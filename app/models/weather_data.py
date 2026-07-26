@@ -1,5 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
+
+from app.models.weather_station import WeatherStation
 
 class WeatherData(BaseModel):
     # Zeitpunkt der Messung (UTC)
@@ -57,3 +59,6 @@ class WeatherData(BaseModel):
 
     # Sonnenstand (aus Home Assistant)
     sun_elevation: float | None = None                 # Grad – Sonnenhöhe über dem Horizont
+
+    # Messstationen
+    stations: list[WeatherStation] = Field(default_factory=list)

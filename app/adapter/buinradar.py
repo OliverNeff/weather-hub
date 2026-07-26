@@ -6,10 +6,7 @@ from buienradar.constants import CONTENT, SUCCESS, RAINCONTENT
 from app.models.weather_data import WeatherData
 
 
-# Buienradar-Antwort: "content" ist ein JSON-String → muss geparst werden
-# Station-Felder, die nicht immer vorkommen
-_MISSING = 0.0
-
+from app.models.weather_station import WeatherStation
 
 async def fetch_buienradar_weather(
         latitude: float,
@@ -28,47 +25,52 @@ async def fetch_buienradar_weather(
     data = json.loads(result[CONTENT])
 
     # Wir nehmen die Station, die den Koordinaten am nächsten kommt
-    station = _nearest_station(data, latitude, longitude)
-
+    station = __nearest_station(data, latitude, longitude)
+    weather_station = WeatherStation(
+        source="buienradar",
+        name=station.get("stationname"),
+        lat=station.get("lat"),
+        lon=station.get("lon")
+    )
     # --- Regenvorhersage (5-Minuten-Raster) ---
     raw_raindata = result.get(RAINCONTENT, "")
-    raindata = parse_raindata(raw_raindata)
+    raindata = __parse_raindata(raw_raindata)
 
     if not raindata:
-     precipitation_next_30m = None
-     precipitation_amount_next_30m = None
-     precipitation_intensity_next_30m = None
+        precipitation_next_30m = None
+        precipitation_amount_next_30m = None
+        precipitation_intensity_next_30m = None
 
-     precipitation_next_1h = None
-     precipitation_amount_next_1h = None
-     precipitation_intensity_next_1h = None
+        precipitation_next_1h = None
+        precipitation_amount_next_1h = None
+        precipitation_intensity_next_1h = None
 
-     precipitation_next_2h = None
-     precipitation_amount_next_2h = None
-     precipitation_intensity_next_2h = None
+        precipitation_next_2h = None
+        precipitation_amount_next_2h = None
+        precipitation_intensity_next_2h = None
 
     else:
-    # 5‑Minuten‑Raster
-      data_30m = raindata[:6]      # 6 Werte = 30 Minuten
-      data_1h  = raindata[:12]     # 12 Werte = 60 Minuten
-      data_2h  = raindata          # alle Werte = 120 Minuten
+        # 5‑Minuten‑Raster
+        data_30m = raindata[:6]      # 6 Werte = 30 Minuten
+        data_1h  = raindata[:12]     # 12 Werte = 60 Minuten
+        data_2h  = raindata          # alle Werte = 120 Minuten
 
-      # 30 Minuten
-      precipitation_next_30m = any(v > 0 for v in data_30m)
-      precipitation_amount_next_30m = sum(data_30m)
-      precipitation_intensity_next_30m = max(data_30m)
+        # 30 Minuten
+        precipitation_next_30m = any(v > 0 for v in data_30m)
+        precipitation_amount_next_30m = sum(data_30m)
+        precipitation_intensity_next_30m = max(data_30m)
 
-      # 1 Stunde
-      precipitation_next_1h = any(v > 0 for v in data_1h)
-      precipitation_amount_next_1h = sum(data_1h)
-      precipitation_intensity_next_1h = max(data_1h)
+        # 1 Stunde
+        precipitation_next_1h = any(v > 0 for v in data_1h)
+        precipitation_amount_next_1h = sum(data_1h)
+        precipitation_intensity_next_1h = max(data_1h)
 
-      # 2 Stunden
-      precipitation_next_2h = any(v > 0 for v in data_2h)
-      precipitation_amount_next_2h = sum(data_2h)
-      precipitation_intensity_next_2h = max(data_2h)
+        # 2 Stunden
+        precipitation_next_2h = any(v > 0 for v in data_2h)
+        precipitation_amount_next_2h = sum(data_2h)
+        precipitation_intensity_next_2h = max(data_2h)
 
-    return WeatherData(
+    weather_data = WeatherData(
         time=datetime.now(timezone.utc),
         # Wind (Buienradar gibt m/s an → unverändert übernehmen)
         wind_speed=station.get("windspeed", None),
@@ -92,13 +94,15 @@ async def fetch_buienradar_weather(
         # Temperatur
         temperature=station.get("temperature", None),
         feels_like=station.get("feeltemperature", None),
-        # UV
-        uv_index=to_uv_index(station.get("sunpower", None)),
+        # UV → Buienradar liefert das nicht
+        uv_index = None,
         # Sonnenstand → Buienradar liefert das nicht
         sun_elevation = None
     )
+    weather_data.stations.append(weather_station)
+    return weather_data
 
-def parse_raindata(raw: str) -> list[float]:
+def __parse_raindata(raw: str) -> list[float]:
     if not raw:
         return []
 
@@ -111,10 +115,7 @@ def parse_raindata(raw: str) -> list[float]:
         if "|" in line
     ]
 
-def to_uv_index(sunpower: float | None) -> float | None:
-    return sunpower * 0.008 if sunpower is not None else None
-
-def _nearest_station(
+def __nearest_station(
         data: dict, latitude: float, longitude: float
 ) -> dict:
     """
