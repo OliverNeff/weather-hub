@@ -68,6 +68,24 @@ The router currently delegates to `fetch_wetterdienst_weather` (DWD). A Buienrad
 
 `WeatherData.stations` is a `list[WeatherStation]` (not a single field), populated via `append()` after model construction.
 
+## Windows SSL Configuration
+
+On Windows, `uv` uses rustls (not OpenSSL). The env vars `SSL_CERT_FILE` and `NODE_EXTRA_CA_CERTS`
+pointing to a single corporate cert break uv's TLS chain validation against pypi.org.
+
+- **`uv.toml`** contains `system-certs = true` — uses Windows Certificate Store.
+- **Do not set** `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` as Windows User/Machine env vars.
+- If `uv lock --upgrade` or `uv sync` fails with `UnknownIssuer`, unset those vars:
+  ```powershell
+  # Remove from user environment (requires new shell)
+  [System.Environment]::SetEnvironmentVariable('SSL_CERT_FILE', $null, 'User')
+  [System.Environment]::SetEnvironmentVariable('NODE_EXTRA_CA_CERTS', $null, 'User')
+  # Or unset for current session only
+  $env:SSL_CERT_FILE=""
+  $env:NODE_EXTRA_CA_CERTS=""
+  ```
+- In this repo, `SSL_CERT_FILE="" NODE_EXTRA_CA_CERTS="" uv lock --upgrade` works around the issue.
+
 ## Important Details
 
 - Buienradar's `content` field is a JSON string (not already-parsed dict) — it must be `json.loads()`-ed before use (see `app/adapter/buinradar.py:25`).
