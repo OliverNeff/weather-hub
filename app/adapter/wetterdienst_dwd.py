@@ -2,7 +2,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import pandas as pd
-from haversine import haversine, Unit
 
 from wetterdienst.provider.dwd.observation import DwdObservationRequest
 from wetterdienst.provider.dwd.mosmix import DwdMosmixRequest
@@ -121,27 +120,29 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         periods="recent",
     )
 
-    stations_result = request.filter_by_rank(
-        latlon=(lat, lon), rank=5
-    )
+    # filter_by_rank rank=1 gibt alle Stationen sortiert nach Entfernung zurück
+    # (Bug in wetterdienst 0.129: filtert nicht auf 1, aber sortiert korrekt)
+    station_df = request.filter_by_rank(latlon=(lat, lon), rank=1).df
 
-    station_df = stations_result.df
     if len(station_df) == 0:
         return _empty_observation()
 
-    nearest = _find_nearest_station(station_df, lat, lon)
-    station_id = nearest["station_id"]
+    first = station_df.row(0, named=True)
+    station_id = first["station_id"]
+    result = _empty_observation()
+    result["station_name"] = first["name"]
+    result["lat"] = first["latitude"]
+    result["lon"] = first["longitude"]
 
     # Daten abrufen — long format: {parameter, date, value}
     values_request = request.filter_by_station_id(station_id=station_id)
     values_dicts = values_request.values.all().df.to_dicts()
 
     if not values_dicts:
-        return _empty_observation()
+        return result
 
     # Long-Format: durch parameter-Name filtern, jeweils den neuesten Wert nehmen
     latest_time = None
-    result = _empty_observation()
 
     for param, key in [
         (param_temperature, "temperature"),
@@ -158,9 +159,6 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             if latest_time is None or str(rows[0]["date"]) > str(latest_time):
                 latest_time = rows[0]["date"]
 
-    result["station_name"] = nearest.get("name")
-    result["lat"] = nearest.get("latitude")
-    result["lon"] = nearest.get("longitude")
     result["time"] = latest_time
 
     return result
@@ -195,16 +193,15 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
         ],
     )
 
-    stations_result = request.filter_by_rank(
-        latlon=(lat, lon), rank=5
-    )
+    # filter_by_rank rank=1 gibt alle Stationen sortiert nach Entfernung zurück
+    # (Bug in wetterdienst 0.129: filtert nicht auf 1, aber sortiert korrekt)
+    station_df = request.filter_by_rank(latlon=(lat, lon), rank=1).df
 
-    station_df = stations_result.df
     if len(station_df) == 0:
         return _empty_forecast()
 
-    nearest = _find_nearest_station(station_df, lat, lon)
-    station_id = nearest["station_id"]
+    first = station_df.row(0, named=True)
+    station_id = first["station_id"]
 
     # MosMix Small — Daten abrufen, long format: {parameter, date, value}
     values_request = request.filter_by_station_id(station_id=station_id)
@@ -270,18 +267,6 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Hilfsfunktionen
 # ---------------------------------------------------------------------------
-
-
-def _find_nearest_station(df, lat: float, lon: float) -> dict:
-    """Finde die naechste Station via Haversine."""
-    rows = df.to_dicts()
-    nearest = min(
-        rows,
-        key=lambda s: haversine(
-            (lat, lon), (s["latitude"], s["longitude"]), Unit.KILOMETERS
-        ),
-    )
-    return nearest
 
 
 def _empty_observation() -> dict[str, Any]:
