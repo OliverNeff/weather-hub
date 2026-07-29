@@ -5,9 +5,6 @@ from app.models.weather_station import WeatherStation
 
 
 class WeatherData(BaseModel):
-    # Zeitpunkt der Messung (UTC)
-    time: datetime
-
     # Wind
     wind_speed: float | None = None                    # m/s – aktuelle Windgeschwindigkeit
     wind_gust: float | None = None                     # m/s – maximale Böe

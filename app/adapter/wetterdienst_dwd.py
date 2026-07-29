@@ -51,6 +51,7 @@ async def fetch_wetterdienst_weather(
         name=obs["station_name"],
         lat=obs["lat"],
         lon=obs["lon"],
+        time=obs.get("time") or datetime.now(timezone.utc),
     )
 
     def _precip_bool(key: str) -> bool | None:
@@ -60,7 +61,6 @@ async def fetch_wetterdienst_weather(
         return val > 0
 
     weather_data = WeatherData(
-        time=obs.get("time") or datetime.now(timezone.utc),
         wind_speed=obs["wind_speed"],
         wind_gust=obs["wind_gust"],
         precipitation_rate=obs["precipitation"],
