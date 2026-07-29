@@ -5,9 +5,15 @@ import pandas as pd
 
 from wetterdienst.provider.dwd.observation import DwdObservationRequest
 from wetterdienst.provider.dwd.mosmix import DwdMosmixRequest
+from wetterdienst.settings import Settings
 
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
+
+# Disable wetterdienst's fsspec cache — stale listings cause
+# "does not have a list of files" errors when the DWD server adds
+# new station zips between cache refreshes.
+_SETTINGS = Settings(cache_disable=True)
 
 # ---------------------------------------------------------------------------
 # MosMix-Parameter (DWD-MOSMIX-Messmodelldaten)
@@ -27,7 +33,7 @@ _MOSMIX_RADIATION = "hourly/small/radiation_global"
 # ---------------------------------------------------------------------------
 _OBS_TEMPERATURE = "10_minutes/temperature_air/temperature_air_mean_2m"
 _OBS_WIND_SPEED = "10_minutes/wind/wind_speed"
-_OBS_WIND_GUST = "10_minutes/wind/wind_gust_max"
+_OBS_WIND_GUST = "10_minutes/wind_extreme/wind_gust_max"
 _OBS_PRECIPITATION = "10_minutes/precipitation/precipitation_height"
 
 
@@ -118,11 +124,12 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             _OBS_PRECIPITATION,
         ],
         periods="recent",
+        settings=_SETTINGS,
     )
 
-    # filter_by_rank rank=1 gibt alle Stationen sortiert nach Entfernung zurück
-    # (Bug in wetterdienst 0.129: filtert nicht auf 1, aber sortiert korrekt)
-    station_df = request.filter_by_rank(latlon=(lat, lon), rank=1).df
+    # filter_by_rank is buggy (returns all stations), so we use a large
+    # distance and take the single nearest station.
+    station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
 
     if len(station_df) == 0:
         return _empty_observation()
@@ -191,11 +198,11 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
             _MOSMIX_RADIATION,
             _MOSMIX_WIND_GUST,  # fuer evtl. spaetere Nutzung
         ],
+        settings=_SETTINGS,
     )
 
-    # filter_by_rank rank=1 gibt alle Stationen sortiert nach Entfernung zurück
-    # (Bug in wetterdienst 0.129: filtert nicht auf 1, aber sortiert korrekt)
-    station_df = request.filter_by_rank(latlon=(lat, lon), rank=1).df
+    # Nearest station, no radius limit.
+    station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
 
     if len(station_df) == 0:
         return _empty_forecast()
