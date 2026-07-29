@@ -75,19 +75,23 @@ async def _get_sun_elevation(lat: float, lon: float) -> float | None:
     if now < sunrise_dt or now > sunset_dt:
         return None
 
-    # Solar declination (degrees) — needed to scale the sinusoidal curve.
+    # NOAA solar elevation formula: sin(el) = sin(lat)*sin(dec) + cos(lat)*cos(dec)*cos(HA)
     day_of_year = now.timetuple().tm_yday
-    declination = math.radians(23.45 * math.sin(2 * math.pi * (284 + day_of_year) / 365))
+    # Solar declination in radians
+    dec = math.radians(23.45 * math.sin(2 * math.pi * (284 + day_of_year) / 365))
+    lat_r = math.radians(lat)
 
-    # Maximum elevation at solar noon: 90° - latitude + declination
-    lat_rad = math.radians(lat)
-    max_elevation = math.degrees(math.pi / 2 - lat_rad + declination)
+    # Hour angle in degrees: 15° per hour from solar noon at this longitude.
+    solar_noon_utc_h = 12.0 - lon / 15.0
+    ha_deg = 15.0 * (now.hour + now.minute / 60.0 + now.second / 3600.0 - solar_noon_utc_h)
+    ha = math.radians(ha_deg)
 
-    # Sinusoidal curve scaled to the actual max elevation.
-    day_length = (sunset_dt - sunrise_dt).total_seconds()
-    elapsed = (now - sunrise_dt).total_seconds()
-    fraction = elapsed / day_length
-    elevation = math.sin(fraction * math.pi) * max_elevation
+    sin_el = math.sin(lat_r) * math.sin(dec) + math.cos(lat_r) * math.cos(dec) * math.cos(ha)
+    sin_el = max(-1.0, min(1.0, sin_el))  # clamp
+    elevation = math.degrees(math.asin(sin_el))
+
+    if elevation < 0:
+        return None
 
     return round(elevation, 1)
 
