@@ -1,14 +1,16 @@
 import math
 from datetime import datetime, timezone
 
+import niquests
 import openmeteo_requests
 
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 
-# Open-Meteo variable IDs
-VAR_SUNRISE = 40
-VAR_SUNSET = 41
+
+# Shared session + client — reused across all requests for connection pooling.
+_session = niquests.AsyncSession()
+_client = openmeteo_requests.AsyncClient(session=_session)
 
 
 async def fetch_openmeteo_weather(
@@ -49,8 +51,7 @@ async def _fetch_sun_data(
     Returns (sunrise, sunset, elevation) — any component may be None.
     """
     try:
-        client = openmeteo_requests.AsyncClient()
-        responses = await client.weather_api(
+        responses = await _client.weather_api(
             url="https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": lat,
@@ -75,9 +76,9 @@ async def _fetch_sun_data(
         var = daily.Variables(i)
         var_id = var.Variable()
         length = var.ValuesInt64Length()
-        if var_id == VAR_SUNRISE and length > 0:
+        if var_id == 40 and length > 0:  # sunrise
             sunrise_ts = var.ValuesInt64(0)
-        elif var_id == VAR_SUNSET and length > 0:
+        elif var_id == 41 and length > 0:  # sunset
             sunset_ts = var.ValuesInt64(0)
 
     sunrise_dt = datetime.fromtimestamp(sunrise_ts, tz=timezone.utc) if sunrise_ts is not None else None
