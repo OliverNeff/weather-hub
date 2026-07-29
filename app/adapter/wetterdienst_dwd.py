@@ -77,6 +77,8 @@ async def fetch_wetterdienst_weather(
         feels_like=None,
         uv_index=fc["uv_index"],
         sun_elevation=sun_elevation,
+        sunrise=None,
+        sunset=None,
     )
 
     weather_data.stations.append(weather_station)
