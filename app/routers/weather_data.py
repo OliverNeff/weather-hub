@@ -1,12 +1,12 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter
 
 from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
 from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
 from app.models.weather_data import WeatherData
-from app.models.weather_station import WeatherStation
 
 router = APIRouter(
     prefix="/weather/data",
@@ -14,7 +14,6 @@ router = APIRouter(
 )
 
 # Fields that can come from any adapter.
-# Priority: DWD (nearest German station) > Buienradar > OpenMeteo.
 _MERGEABLE_FIELDS = [
     "wind_speed",
     "wind_gust",
@@ -36,9 +35,11 @@ _MERGEABLE_FIELDS = [
     "sunset",
 ]
 
-# Precipitation fields where we take the conservative (max) value across
-# all adapters — if *any* adapter reports rain, we report it.
-_PRECIP_FIELDS = {
+# Wind + precipitation: take the max across all adapters.
+# Missing rain or under-reported wind is worse than over-reporting it.
+_CONSERVATIVE_FIELDS = {
+    "wind_speed",
+    "wind_gust",
     "precipitation_rate",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",
@@ -62,7 +63,7 @@ def _pick_first(data: tuple, field: str):
 
 
 def _pick_max(data: tuple, field: str):
-    """Return the max non-None value for *field* — used for precipitation."""
+    """Return the max non-None value for *field*."""
     best = None
     for wd in data:
         val = getattr(wd, field)
@@ -72,18 +73,13 @@ def _pick_max(data: tuple, field: str):
     return best
 
 
-def _station_time(wd: WeatherData) -> datetime | None:
-    """Return the time of the first station, if any."""
-    if wd.stations:
-        return wd.stations[0].time
-    return None
-
-
-def _sorted_by_time(data: tuple) -> list:
+def _sorted_by_freshness(data: tuple) -> list:
     """Sort adapters newest first. Adapters without a time go to the end."""
     now = datetime.now(timezone.utc)
     def _sort_key(wd):
-        t = _station_time(wd)
+        if not wd.stations:
+            return now - timedelta(days=1)
+        t = wd.stations[0].time
         if t is None:
             return now - timedelta(days=1)
         return t
@@ -113,21 +109,25 @@ async def get_weather_data(
 
     merged = WeatherData()
 
-    # Order adapters by freshness — newest data wins.
-    fresh = _sorted_by_time((dwd, buienradar, openmeteo))
+    # Order adapters by freshness (newest data first) for accurate fields.
+    fresh = _sorted_by_freshness((dwd, buienradar, openmeteo))
+    all_data = (dwd, buienradar, openmeteo)
 
-    # For each mergeable field, take first non-None across adapters.
-    # Precipitation fields use max (conservative: rain > no rain).
-    # feels_like prefers openmeteo (apparent_temperature) over buienradar.
     for field in _MERGEABLE_FIELDS:
         if field == "time":
             continue
-        if field in _PRECIP_FIELDS:
-            val = _pick_max(fresh, field)
+        if field in _CONSERVATIVE_FIELDS:
+            # Wind + precipitation: highest value across all adapters.
+            val = _pick_max(all_data, field)
         elif field == "feels_like":
-            openmeteo_first = _pick_first([a for a in fresh if a.stations and a.stations[0].source == "openmeteo"], field)
-            val = openmeteo_first if openmeteo_first is not None else _pick_first(fresh, field)
+            # Prefer openmeteo (apparent_temperature), fallback to any.
+            om = _pick_first(
+                [a for a in fresh if a.stations and a.stations[0].source == "openmeteo"],
+                field,
+            )
+            val = om if om is not None else _pick_first(fresh, field)
         else:
+            # uv_index, temperature, sun data: freshest source.
             val = _pick_first(fresh, field)
         setattr(merged, field, val)
 
