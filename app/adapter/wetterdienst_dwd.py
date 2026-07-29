@@ -46,12 +46,14 @@ async def fetch_wetterdienst_weather(
 
     sun_elevation = None  # Provided by openmeteo adapter
 
+    # Use current time — DWD observation timestamps are old
+    # (10-min interval, up to hours behind).
     weather_station = WeatherStation(
         source="dwd",
         name=obs["station_name"],
         lat=obs["lat"],
         lon=obs["lon"],
-        time=obs.get("time") or datetime.now(timezone.utc),
+        time=datetime.now(timezone.utc),
     )
 
     def _precip_bool(key: str) -> bool | None:
