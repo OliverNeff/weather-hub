@@ -290,19 +290,14 @@ def _find_nearest_station(
     the request retried once.
     """
     try:
+        return request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1).row(0, named=True)
+    except FileNotFoundError as exc:
+        _logger.warning("Stale cache detected, clearing and retrying: %s", exc)
+        _clear_cache()
         station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
-    except Exception as exc:
-        if "does not have a list of files" in str(exc):
-            _logger.warning("Stale cache detected, clearing and retrying: %s", exc)
-            _clear_cache()
-            station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
-        else:
-            raise
-
-    if len(station_df) == 0:
-        return None
-
-    return station_df.row(0, named=True)
+        if len(station_df) == 0:
+            return None
+        return station_df.row(0, named=True)
 
 
 def _empty_observation() -> dict[str, Any]:
