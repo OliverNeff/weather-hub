@@ -1,7 +1,4 @@
-import logging
 import math
-import pathlib
-import shutil
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -11,25 +8,20 @@ from wetterdienst.provider.dwd.observation import DwdObservationRequest
 from wetterdienst.provider.dwd.mosmix import DwdMosmixRequest
 from wetterdienst.settings import Settings
 
-from app.adapter.openmeteo import fetch_uv_index
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 
-_logger = logging.getLogger(__name__)
-
-# Cache-enabled by default. If cache_disable=True is set (e.g. via env or
-# settings file), fsspec caching is skipped and cache-retry is a no-op.
-_SETTINGS = Settings()
+# Disable wetterdienst's fsspec cache — stale listings cause
+# "does not have a list of files" errors when the DWD server adds
+# new station zips between cache refreshes.
+_SETTINGS = Settings(cache_disable=True)
 
 # ---------------------------------------------------------------------------
 # MosMix-Parameter (DWD-MOSMIX-Messmodelldaten)
 # Format: resolution/dataset/parameter
 # ---------------------------------------------------------------------------
-_MOSMIX_TEMPERATURE = "hourly/small/temperature_air_mean_2m"
-_MOSMIX_WIND_SPEED = "hourly/small/wind_speed"
-_MOSMIX_WIND_GUST = "hourly/small/wind_gust_max_last_1h"
-# Niederschlagsmenge signifikanten Wetter (mm) pro Stunde
 _MOSMIX_PRECIPITATION = "hourly/small/precipitation_height_significant_weather_last_1h"
+_MOSMIX_RADIATION = "hourly/small/radiation_global"
 
 # ---------------------------------------------------------------------------
 # DWD-Observation-Parameter (Met stationsweise Beobachtung)
@@ -46,14 +38,13 @@ async def fetch_wetterdienst_weather(
 ) -> WeatherData:
     """
     Holt aktuelle Wetterdaten von DWD Observation und Vorhersage von
-    MOSMIX Small. Die naechstgelegene Station wird ueber Haversine ermittelt.
-
-    Niederschlagsmenge (amount) ist in mm, Intensitaet (intensity) in mm/h.
-    MosMix liefert bereits mm/h -- kein weiterer Umrechnungsschritt noetig.
+    MOSMIX Small. Jeder Parameter sucht die naechstgelegene Station
+    separat — verschiedene DWD-Datasets decken unterschiedliche Stationen ab.
     """
     obs = _fetch_observation(latitude, longitude)
     fc = _fetch_forecast(latitude, longitude)
-    uv = await fetch_uv_index(latitude, longitude)
+
+    sun_elevation = None  # Provided by openmeteo adapter
 
     weather_station = WeatherStation(
         source="dwd",
@@ -70,12 +61,9 @@ async def fetch_wetterdienst_weather(
 
     weather_data = WeatherData(
         time=obs.get("time") or datetime.now(timezone.utc),
-        # Wind (m/s -- DWD liefert bereits m/s)
         wind_speed=obs["wind_speed"],
         wind_gust=obs["wind_gust"],
-        # Regen aktuell (mm -- DWD Beobachtung: letzte 10 min als Gesamtmenge)
         precipitation_rate=obs["precipitation"],
-        # Regenvorhersage (MosMix, mm / mm/h)
         precipitation_next_30m=_precip_bool("precip_30m"),
         precipitation_amount_next_30m=fc["precip_30m"],
         precipitation_intensity_next_30m=fc["intensity_30m"],
@@ -85,11 +73,10 @@ async def fetch_wetterdienst_weather(
         precipitation_next_2h=_precip_bool("precip_2h"),
         precipitation_amount_next_2h=fc["precip_2h"],
         precipitation_intensity_next_2h=fc["intensity_2h"],
-        # Temperatur (C -- DWD Observation liefert C)
         temperature=obs["temperature"],
-        feels_like=None,  # DWD liefert keine gefuehlte Temperatur
-        uv_index=uv,
-        sun_elevation=None,
+        feels_like=None,
+        uv_index=fc["uv_index"],
+        sun_elevation=sun_elevation,
     )
 
     weather_data.stations.append(weather_station)
@@ -100,67 +87,60 @@ async def fetch_wetterdienst_weather(
 # Beobachtung (DWD Met stationsweise)
 # ---------------------------------------------------------------------------
 
-
 def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     """
-    Holt die neuesten Messwerte der naechstgelegenen DWD-Station.
-
-    Verwendet Aufloesung ``10_minutes`` mit Periode ``recent``, weil diese
-    Kombination die benoetigten Parameter (Temperatur, Wind, Regen) enthaelt.
-
-    DWD Observation liefert Daten im Long-Format:
-    Jede Zeile hat {parameter, date, value} — nicht als separate Spalten pro Parameter.
+    Holt die neuesten Messwerte. Jeder Parameter wird separat abgefragt,
+    weil verschiedene DWD-Datasets unterschiedliche Stationen abdecken.
     """
-    param_temperature = "temperature_air_mean_2m"
-    param_wind_speed = "wind_speed"
-    param_wind_gust = "wind_gust_max"
-    param_precipitation = "precipitation_height"
+    _PARAMS = [
+        # (obs_spec, result_key)
+        (_OBS_TEMPERATURE, "temperature"),
+        (_OBS_WIND_SPEED, "wind_speed"),
+        (_OBS_WIND_GUST, "wind_gust"),
+        (_OBS_PRECIPITATION, "precipitation"),
+    ]
 
-    request = DwdObservationRequest(
-        parameters=[
-            _OBS_TEMPERATURE,
-            _OBS_WIND_SPEED,
-            _OBS_WIND_GUST,
-            _OBS_PRECIPITATION,
-        ],
-        periods="recent",
-        settings=_SETTINGS,
-    )
-
-    first = _find_nearest_station(request, lat, lon)
-    if first is None:
-        return _empty_observation()
-
-    station_id = first["station_id"]
     result = _empty_observation()
-    result["station_name"] = first["name"]
-    result["lat"] = first["latitude"]
-    result["lon"] = first["longitude"]
-
-    # Daten abrufen — long format: {parameter, date, value}
-    values_request = request.filter_by_station_id(station_id=station_id)
-    values_dicts = values_request.values.all().df.to_dicts()
-
-    if not values_dicts:
-        return result
-
-    # Long-Format: durch parameter-Name filtern, jeweils den neuesten Wert nehmen
     latest_time = None
 
-    for param, key in [
-        (param_temperature, "temperature"),
-        (param_wind_speed, "wind_speed"),
-        (param_wind_gust, "wind_gust"),
-        (param_precipitation, "precipitation"),
-    ]:
-        rows = [r for r in values_dicts if r["parameter"] == param]
-        if rows:
-            rows.sort(key=lambda r: str(r["date"]), reverse=True)
-            val = _to_float_value(rows[0])
-            if val is not None:
-                result[key] = val
-            if latest_time is None or str(rows[0]["date"]) > str(latest_time):
-                latest_time = rows[0]["date"]
+    for obs_param, key in _PARAMS:
+        req = DwdObservationRequest(
+            parameters=[obs_param],
+            periods="recent",
+            settings=_SETTINGS,
+        )
+        try:
+            station_df = req.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+        except Exception:
+            continue
+
+        if len(station_df) == 0:
+            continue
+
+        first = station_df.row(0, named=True)
+        station_id = first["station_id"]
+
+        # First value carries station name (from whichever param resolves first).
+        if result["station_name"] is None:
+            result["station_name"] = first["name"]
+            result["lat"] = first["latitude"]
+            result["lon"] = first["longitude"]
+
+        try:
+            values_df = req.filter_by_station_id(station_id=station_id).values.all().df
+        except Exception:
+            continue
+
+        values_dicts = values_df.to_dicts()
+        if not values_dicts:
+            continue
+
+        values_dicts.sort(key=lambda r: str(r["date"]), reverse=True)
+        val = _to_float_value(values_dicts[0])
+        if val is not None:
+            result[key] = val
+        if latest_time is None or str(values_dicts[0]["date"]) > str(latest_time):
+            latest_time = values_dicts[0]["date"]
 
     result["time"] = latest_time
     return result
@@ -170,45 +150,42 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 # Vorhersage (DWD MOSMIX Small)
 # ---------------------------------------------------------------------------
 
-
 def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
     """
     Holt die naechsten 2 Stunden aus DWD MOSMIX Small.
-
-    MosMix liefert stuendliche Prognosen; wir mappen sie auf 30 / 60 / 120 min.
-    Jeder MosMix-Zeitpunkt hat einen eigenen Niederschlagswert in mm/h.
-    Der Mittelwert der Werte im Fenster ist die durchschnittliche Intensitaet.
-
-    DWD MosMix liefert Daten im Long-Format:
-    Jede Zeile hat {parameter, date, value} — nicht als separate Spalten pro Parameter.
     """
     param_precipitation = "precipitation_height_significant_weather_last_1h"
+    param_radiation = "radiation_global"
 
     request = DwdMosmixRequest(
         parameters=[
-            _MOSMIX_TEMPERATURE,
-            _MOSMIX_WIND_SPEED,
             _MOSMIX_PRECIPITATION,
-            _MOSMIX_WIND_GUST,  # fuer evtl. spaetere Nutzung
+            _MOSMIX_RADIATION,
         ],
         settings=_SETTINGS,
     )
 
-    first = _find_nearest_station(request, lat, lon)
-    if first is None:
+    try:
+        station_df = request.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+    except Exception:
         return _empty_forecast()
 
+    if len(station_df) == 0:
+        return _empty_forecast()
+
+    first = station_df.row(0, named=True)
     station_id = first["station_id"]
 
-    # MosMix Small — Daten abrufen, long format: {parameter, date, value}
-    values_request = request.filter_by_station_id(station_id=station_id)
-    values_dicts = values_request.values.all().df.to_dicts()
+    try:
+        values_dicts = request.filter_by_station_id(station_id=station_id).values.all().df.to_dicts()
+    except Exception:
+        return _empty_forecast()
 
     if not values_dicts:
         return _empty_forecast()
 
-    # Long-Format: nach Parameter filtern
     precip_rows = [r for r in values_dicts if r["parameter"] == param_precipitation]
+    radiation_rows = [r for r in values_dicts if r["parameter"] == param_radiation]
 
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     forecast: dict[str, Any] = {
@@ -218,13 +195,13 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
         "intensity_1h": None,
         "precip_2h": None,
         "intensity_2h": None,
+        "uv_index": None,
     }
 
-    # Prognose-Fenster (naechste 2 Stunden)
-    windows: dict[str, tuple[datetime, datetime]] = {
+    windows = {
         "30m": (now, now + timedelta(minutes=30)),
-        "1h":  (now, now + timedelta(hours=1)),
-        "2h":  (now, now + timedelta(hours=2)),
+        "1h": (now, now + timedelta(hours=1)),
+        "2h": (now, now + timedelta(hours=2)),
     }
 
     for label, (t_start, t_end) in windows.items():
@@ -238,11 +215,22 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
             if val is not None:
                 precip_values.append(val)
 
-        # Mittelwert der Regenwerte im Fenster (mm/h -- MosMix liefert bereits mm/h)
         if precip_values:
             mean_intensity = sum(precip_values) / len(precip_values)
             forecast[f"precip_{label}"] = round(mean_intensity, 2)
             forecast[f"intensity_{label}"] = round(mean_intensity, 2)
+
+    # UV-Index aus Globalstrahlung (J/m^2)
+    radiation_values: list[float] = []
+    for r in radiation_rows:
+        val = _to_float_value(r)
+        if val is not None:
+            radiation_values.append(val)
+
+    if radiation_values and forecast["uv_index"] is None:
+        mean_rad_jm2 = sum(radiation_values) / len(radiation_values)
+        uv_approx = round(mean_rad_jm2 * 0.019, 1)
+        forecast["uv_index"] = min(max(uv_approx, 0), 16)
 
     return forecast
 
@@ -250,39 +238,6 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Hilfsfunktionen
 # ---------------------------------------------------------------------------
-
-
-def _clear_cache() -> None:
-    """Remove the wetterdienst fsspec cache directory so stale
-    station listings are refreshed on the next request."""
-    if _SETTINGS.cache_disable:
-        return
-    cache = pathlib.Path(_SETTINGS.cache_dir)
-    if cache.exists():
-        _logger.info("Clearing wetterdienst cache: %s", cache)
-        shutil.rmtree(cache)
-
-
-def _find_nearest_station(
-    request: DwdObservationRequest | DwdMosmixRequest,
-    lat: float,
-    lon: float,
-) -> Any:
-    """Return the nearest station row.
-
-    On fsspec cache errors (stale listings), the cache is cleared and
-    the request retried once.
-    """
-    try:
-        return request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1).row(0, named=True)
-    except FileNotFoundError as exc:
-        _logger.warning("Stale cache detected, clearing and retrying: %s", exc)
-        _clear_cache()
-        station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
-        if len(station_df) == 0:
-            return None
-        return station_df.row(0, named=True)
-
 
 def _empty_observation() -> dict[str, Any]:
     return {
@@ -305,16 +260,8 @@ def _empty_forecast() -> dict[str, Any]:
         "intensity_1h": None,
         "precip_2h": None,
         "intensity_2h": None,
+        "uv_index": None,
     }
-
-
-def _to_float(record: dict[str, Any], key: str) -> float | None:
-    """Key aus Dictionary lesen und nach float konvertieren (NaN -> None)."""
-    val = record.get(key)
-    if val is None:
-        return None
-    f = float(val)
-    return None if math.isnan(f) else f
 
 
 def _to_float_value(record: dict[str, Any]) -> float | None:
@@ -327,7 +274,7 @@ def _to_float_value(record: dict[str, Any]) -> float | None:
 
 
 def _parse_datetime(dt_val: Any) -> datetime | None:
-    """Verschiedene Datumsformate aus MosMix/Beobachtung parsen."""
+    """Verschiedene Datumsformate parsen."""
     if dt_val is None:
         return None
     if isinstance(dt_val, datetime):
