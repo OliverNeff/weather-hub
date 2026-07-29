@@ -30,7 +30,8 @@ async def fetch_buienradar_weather(
         source="buienradar",
         name=station.get("stationname"),
         lat=station.get("lat"),
-        lon=station.get("lon")
+        lon=station.get("lon"),
+        time=datetime.now(timezone.utc),
     )
     # --- Regenvorhersage (5-Minuten-Raster) ---
     raw_raindata = result.get(RAINCONTENT, "")

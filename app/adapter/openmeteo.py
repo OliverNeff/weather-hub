@@ -68,9 +68,9 @@ async def fetch_openmeteo_weather(
     # Build forecast windows from hourly precipitation
     now = datetime.now(timezone.utc)
     forecast = _parse_hourly_precipitation(resp.Hourly(), now)
+    weather_time = datetime.fromtimestamp(current.Time(), tz=timezone.utc)
 
     weather_data = WeatherData(
-        time=datetime.fromtimestamp(current.Time(), tz=timezone.utc),
         temperature=_safe(current, _VAR_TEMPERATURE),
         feels_like=_safe(current, _VAR_APPARENT_TEMPERATURE),
         wind_speed=_kmh(_safe(current, _VAR_WIND_SPEED)),
@@ -89,6 +89,7 @@ async def fetch_openmeteo_weather(
             name="computed",
             lat=latitude,
             lon=longitude,
+            time=weather_time,
         )
     )
 
@@ -97,9 +98,9 @@ async def fetch_openmeteo_weather(
 
 def _empty(lat: float, lon: float) -> WeatherData:
     """Return an empty WeatherData when the API call failed entirely."""
-    data = WeatherData(time=datetime.now(timezone.utc))
+    data = WeatherData()
     data.stations.append(
-        WeatherStation(source="openmeteo", name="computed", lat=lat, lon=lon)
+        WeatherStation(source="openmeteo", name="computed", lat=lat, lon=lon, time=datetime.now(timezone.utc))
     )
     return data
 

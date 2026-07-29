@@ -16,7 +16,6 @@ router = APIRouter(
 # Fields that can come from any adapter.
 # Priority: DWD (nearest German station) > Buienradar > OpenMeteo.
 _MERGEABLE_FIELDS = [
-    "time",
     "wind_speed",
     "wind_gust",
     "precipitation_rate",
@@ -78,8 +77,7 @@ async def _safe_fetch(func, lat, lon):
     try:
         return await func(latitude=lat, longitude=lon)
     except Exception:
-        data = WeatherData(time=datetime.now(timezone.utc))
-        return data
+        return WeatherData()
 
 
 @router.get("", response_model=WeatherData)
@@ -95,9 +93,7 @@ async def get_weather_data(
         _safe_fetch(fetch_openmeteo_weather, lat, lon),
     )
 
-    # Use current time — the merged response combines values from different
-    # adapters whose own timestamps may vary (DWD 10-min intervals, etc.).
-    merged = WeatherData(time=datetime.now(timezone.utc))
+    merged = WeatherData()
 
     # For each mergeable field, take first non-None across adapters.
     # Precipitation fields use max (conservative: rain > no rain).
