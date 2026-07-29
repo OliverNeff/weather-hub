@@ -11,3 +11,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Python version (managed per-environment)
+.python-version
