@@ -51,7 +51,7 @@ async def fetch_wetterdienst_weather(
         name=obs["station_name"],
         lat=obs["lat"],
         lon=obs["lon"],
-        time=datetime.now(timezone.utc),
+        time=obs.get("time"),
     )
 
     def _precip_bool(key: str) -> bool | None:
@@ -91,8 +91,10 @@ async def fetch_wetterdienst_weather(
 
 def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     """
-    Holt die neuesten Messwerte. Jeder Parameter wird separat abgefragt,
-    weil verschiedene DWD-Datasets unterschiedliche Stationen abdecken.
+    Holt die neuesten Messwerte von den 3 nächsten Stationen.
+    Jeder Parameter wird separat abgefragt, weil verschiedene DWD-Datasets
+    unterschiedliche Stationen abdecken. Am Ende wird die Station mit dem
+    frischesten Messzeitpunkt bevorzugt.
     """
     _PARAMS = [
         # (obs_spec, result_key)
@@ -102,8 +104,8 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         (_OBS_PRECIPITATION, "precipitation"),
     ]
 
-    result = _empty_observation()
-    latest_time = None
+    # Per-station cache: station_id → {info, values_by_key}
+    station_cache: dict[str, dict] = {}
 
     for obs_param, key in _PARAMS:
         req = DwdObservationRequest(
@@ -119,32 +121,75 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         if len(station_df) == 0:
             continue
 
-        first = station_df.row(0, named=True)
-        station_id = first["station_id"]
+        # Look at up to 3 nearest stations
+        for row_idx in range(min(3, len(station_df))):
+            first = station_df.row(row_idx, named=True)
+            station_id = first["station_id"]
 
-        # First value carries station name (from whichever param resolves first).
-        if result["station_name"] is None:
-            result["station_name"] = first["name"]
-            result["lat"] = first["latitude"]
-            result["lon"] = first["longitude"]
+            # Lazily load station values
+            if station_id not in station_cache:
+                station_cache[station_id] = {
+                    "info": {
+                        "name": first["name"],
+                        "lat": first["latitude"],
+                        "lon": first["longitude"],
+                    },
+                    "values": {},
+                    "latest_time": None,
+                }
+                try:
+                    values_df = req.filter_by_station_id(station_id=station_id).values.all().df
+                    values_dicts = values_df.to_dicts()
+                    if values_dicts:
+                        values_dicts.sort(key=lambda r: str(r["date"]), reverse=True)
+                        station_cache[station_id]["latest_time"] = values_dicts[0]["date"]
+                except Exception:
+                    pass
 
-        try:
-            values_df = req.filter_by_station_id(station_id=station_id).values.all().df
-        except Exception:
-            continue
+            values_dicts_cached = station_cache[station_id]["values"].get(key)
+            if values_dicts_cached is None:
+                try:
+                    values_df = req.filter_by_station_id(station_id=station_id).values.all().df
+                    values_dicts = values_df.to_dicts()
+                    values_dicts.sort(key=lambda r: str(r["date"]), reverse=True)
+                    station_cache[station_id]["values"][key] = values_dicts
+                    if station_cache[station_id]["latest_time"] is None and values_dicts:
+                        station_cache[station_id]["latest_time"] = values_dicts[0]["date"]
+                except Exception:
+                    pass
 
-        values_dicts = values_df.to_dicts()
-        if not values_dicts:
-            continue
+            values_dicts = station_cache[station_id]["values"].get(key) or []
+            if not values_dicts:
+                continue
 
-        values_dicts.sort(key=lambda r: str(r["date"]), reverse=True)
-        val = _to_float_value(values_dicts[0])
-        if val is not None:
-            result[key] = val
-        if latest_time is None or str(values_dicts[0]["date"]) > str(latest_time):
-            latest_time = values_dicts[0]["date"]
+            val = _to_float_value(values_dicts[0])
+            if val is not None:
+                station_cache[station_id]["values"][key] = values_dicts
 
-    result["time"] = latest_time
+    # Find the station with the freshest data
+    if not station_cache:
+        return _empty_observation()
+
+    best_station_id = max(
+        station_cache,
+        key=lambda sid: station_cache[sid]["latest_time"] or "",
+    )
+
+    best = station_cache[best_station_id]
+    result = _empty_observation()
+    result["station_name"] = best["info"]["name"]
+    result["lat"] = best["info"]["lat"]
+    result["lon"] = best["info"]["lon"]
+    result["time"] = best["latest_time"]
+
+    # Extract values from the best station
+    for obs_param, key in _PARAMS:
+        values_dicts = best["values"].get(key)
+        if values_dicts:
+            val = _to_float_value(values_dicts[0])
+            if val is not None:
+                result[key] = val
+
     return result
 
 
