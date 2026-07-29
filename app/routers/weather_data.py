@@ -32,6 +32,8 @@ _MERGEABLE_FIELDS = [
     "feels_like",
     "uv_index",
     "sun_elevation",
+    "sunrise",
+    "sunset",
 ]
 
 

@@ -12,13 +12,15 @@ async def fetch_openmeteo_weather(
 ) -> WeatherData:
     """
     Holt sunrise/sunset von Open-Meteo und berechnet daraus die
-    aktuelle Sonnenelevation (sinusoidal approximation).
+    aktuelle Sonnenelevation.
     """
-    sun_elevation = await _get_sun_elevation(latitude, longitude)
+    sunrise_dt, sunset_dt, sun_elevation = await _fetch_sun_data(latitude, longitude)
 
     weather_data = WeatherData(
         time=datetime.now(timezone.utc),
         sun_elevation=sun_elevation,
+        sunrise=sunrise_dt,
+        sunset=sunset_dt,
     )
 
     weather_data.stations.append(
@@ -33,11 +35,10 @@ async def fetch_openmeteo_weather(
     return weather_data
 
 
-async def _get_sun_elevation(lat: float, lon: float) -> float | None:
+async def _fetch_sun_data(lat: float, lon: float) -> tuple[datetime | None, datetime | None, float | None]:
     """
-    Fetch sunrise/sunset from Open-Meteo for today in UTC, compute sun
-    elevation via sinusoidal approximation scaled to the actual maximum
-    elevation for the given latitude.
+    Fetch sunrise/sunset from Open-Meteo, compute elevation via NOAA formula.
+    Returns (sunrise, sunset, elevation) — any component may be None.
     """
     try:
         async with httpx.AsyncClient() as client:
@@ -55,45 +56,40 @@ async def _get_sun_elevation(lat: float, lon: float) -> float | None:
             resp.raise_for_status()
             data = resp.json()
     except Exception:
-        return None
+        return None, None, None
 
     try:
         daily = data["daily"]
         sunrise_str = daily["sunrise"][0]
         sunset_str = daily["sunset"][0]
     except (KeyError, IndexError):
-        return None
+        return None, None, None
 
     sunrise_dt = _parse_utc(sunrise_str)
     sunset_dt = _parse_utc(sunset_str)
     if sunrise_dt is None or sunset_dt is None:
-        return None
+        return None, None, None
 
     now = datetime.now(timezone.utc)
 
     # Before sunrise or after sunset -> below horizon.
     if now < sunrise_dt or now > sunset_dt:
-        return None
+        return sunrise_dt, sunset_dt, None
 
-    # NOAA solar elevation formula: sin(el) = sin(lat)*sin(dec) + cos(lat)*cos(dec)*cos(HA)
+    # NOAA solar elevation formula.
     day_of_year = now.timetuple().tm_yday
-    # Solar declination in radians
     dec = math.radians(23.45 * math.sin(2 * math.pi * (284 + day_of_year) / 365))
     lat_r = math.radians(lat)
 
-    # Hour angle in degrees: 15° per hour from solar noon at this longitude.
     solar_noon_utc_h = 12.0 - lon / 15.0
     ha_deg = 15.0 * (now.hour + now.minute / 60.0 + now.second / 3600.0 - solar_noon_utc_h)
     ha = math.radians(ha_deg)
 
     sin_el = math.sin(lat_r) * math.sin(dec) + math.cos(lat_r) * math.cos(dec) * math.cos(ha)
-    sin_el = max(-1.0, min(1.0, sin_el))  # clamp
+    sin_el = max(-1.0, min(1.0, sin_el))
     elevation = math.degrees(math.asin(sin_el))
 
-    if elevation < 0:
-        return None
-
-    return round(elevation, 1)
+    return sunrise_dt, sunset_dt, round(elevation, 1)
 
 
 def _parse_utc(iso_str: str) -> datetime:
