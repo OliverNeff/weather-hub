@@ -95,13 +95,9 @@ async def get_weather_data(
         _safe_fetch(fetch_openmeteo_weather, lat, lon),
     )
 
-    # Resolve time from first adapter that has it.
-    time_val = _pick_first((dwd, buienradar, openmeteo), "time")
-    if time_val is None:
-        time_val = datetime.now(timezone.utc)
-
-    # Build merged WeatherData — start with time (required field).
-    merged = WeatherData(time=time_val)
+    # Use current time — the merged response combines values from different
+    # adapters whose own timestamps may vary (DWD 10-min intervals, etc.).
+    merged = WeatherData(time=datetime.now(timezone.utc))
 
     # For each mergeable field, take first non-None across adapters.
     # Precipitation fields use max (conservative: rain > no rain).
