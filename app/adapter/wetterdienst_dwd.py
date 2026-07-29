@@ -1,4 +1,5 @@
 import logging
+import math
 import pathlib
 import shutil
 from datetime import datetime, timezone, timedelta
@@ -331,7 +332,7 @@ def _to_float(record: dict[str, Any], key: str) -> float | None:
     if val is None:
         return None
     f = float(val)
-    return None if (f != f) else f  # NaN check
+    return None if math.isnan(f) else f
 
 
 def _to_float_value(record: dict[str, Any]) -> float | None:
@@ -340,7 +341,7 @@ def _to_float_value(record: dict[str, Any]) -> float | None:
     if val is None:
         return None
     f = float(val)
-    return None if (f != f) else f  # NaN check
+    return None if math.isnan(f) else f
 
 
 def _parse_datetime(dt_val: Any) -> datetime | None:
