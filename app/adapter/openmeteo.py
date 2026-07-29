@@ -35,8 +35,9 @@ async def fetch_openmeteo_weather(
 
 async def _get_sun_elevation(lat: float, lon: float) -> float | None:
     """
-    Fetch sunrise/sunset from Open-Meteo for today, compute sun elevation
-    via sinusoidal approximation. None if sun is below horizon.
+    Fetch sunrise/sunset from Open-Meteo for today in UTC, compute sun
+    elevation via sinusoidal approximation scaled to the actual maximum
+    elevation for the given latitude.
     """
     try:
         async with httpx.AsyncClient() as client:
@@ -46,7 +47,7 @@ async def _get_sun_elevation(lat: float, lon: float) -> float | None:
                     "latitude": lat,
                     "longitude": lon,
                     "daily": "sunrise,sunset",
-                    "timezone": "auto",
+                    "timezone": "UTC",
                     "forecast_days": 1,
                 },
                 timeout=5.0,
@@ -63,9 +64,8 @@ async def _get_sun_elevation(lat: float, lon: float) -> float | None:
     except (KeyError, IndexError):
         return None
 
-    # Parse ISO times to UTC datetime.
-    sunrise_dt = _parse_iso(sunrise_str)
-    sunset_dt = _parse_iso(sunset_str)
+    sunrise_dt = _parse_utc(sunrise_str)
+    sunset_dt = _parse_utc(sunset_str)
     if sunrise_dt is None or sunset_dt is None:
         return None
 
@@ -75,21 +75,27 @@ async def _get_sun_elevation(lat: float, lon: float) -> float | None:
     if now < sunrise_dt or now > sunset_dt:
         return None
 
-    # Sinusoidal: sun reaches ~90 deg at solar noon.
+    # Solar declination (degrees) — needed to scale the sinusoidal curve.
+    day_of_year = now.timetuple().tm_yday
+    declination = math.radians(23.45 * math.sin(2 * math.pi * (284 + day_of_year) / 365))
+
+    # Maximum elevation at solar noon: 90° - latitude + declination
+    lat_rad = math.radians(lat)
+    max_elevation = math.degrees(math.pi / 2 - lat_rad + declination)
+
+    # Sinusoidal curve scaled to the actual max elevation.
     day_length = (sunset_dt - sunrise_dt).total_seconds()
     elapsed = (now - sunrise_dt).total_seconds()
     fraction = elapsed / day_length
-    elevation = math.sin(fraction * math.pi) * 90.0
+    elevation = math.sin(fraction * math.pi) * max_elevation
 
     return round(elevation, 1)
 
 
-def _parse_iso(iso_str: str) -> datetime:
-    """Parse ISO 8601 datetime string (with timezone offset)."""
+def _parse_utc(iso_str: str) -> datetime:
+    """Parse an ISO 8601 datetime string, always return UTC."""
     try:
-        # e.g. "2026-07-29T05:50" or "2026-07-29T05:50:00+02:00"
         parsed = datetime.fromisoformat(iso_str)
-        # If naive (no tz), assume UTC (Open-Meteo with timezone=auto returns offset).
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
