@@ -44,15 +44,11 @@ async def fetch_wetterdienst_weather(
     obs = _fetch_observation(latitude, longitude)
     fc = _fetch_forecast(latitude, longitude)
 
-    sun_elevation = None  # Provided by openmeteo adapter
+    # _fetch_observation returns {"_primary": best_station, "_all": [all stations]}
+    primary = obs.get("_primary") or _empty_observation()
+    all_stations = obs.get("_all", [])
 
-    weather_station = WeatherStation(
-        source="dwd",
-        name=obs["station_name"],
-        lat=obs["lat"],
-        lon=obs["lon"],
-        time=obs.get("time"),
-    )
+    sun_elevation = None  # Provided by openmeteo adapter
 
     def _precip_bool(key: str) -> bool | None:
         val = fc[key]
@@ -61,9 +57,9 @@ async def fetch_wetterdienst_weather(
         return val > 0
 
     weather_data = WeatherData(
-        wind_speed=obs["wind_speed"],
-        wind_gust=obs["wind_gust"],
-        precipitation_rate=obs["precipitation"],
+        wind_speed=primary["wind_speed"],
+        wind_gust=primary["wind_gust"],
+        precipitation_rate=primary["precipitation"],
         precipitation_next_30m=_precip_bool("precip_30m"),
         precipitation_amount_next_30m=fc["precip_30m"],
         precipitation_intensity_next_30m=fc["intensity_30m"],
@@ -73,7 +69,7 @@ async def fetch_wetterdienst_weather(
         precipitation_next_2h=_precip_bool("precip_2h"),
         precipitation_amount_next_2h=fc["precip_2h"],
         precipitation_intensity_next_2h=fc["intensity_2h"],
-        temperature=obs["temperature"],
+        temperature=primary["temperature"],
         feels_like=None,
         uv_index=fc["uv_index"],
         sun_elevation=sun_elevation,
@@ -81,7 +77,16 @@ async def fetch_wetterdienst_weather(
         sunset=None,
     )
 
-    weather_data.stations.append(weather_station)
+    # Add all DWD stations that contributed data, not just the best one
+    for station_data in all_stations:
+        weather_data.stations.append(WeatherStation(
+            source="dwd",
+            name=station_data["station_name"],
+            lat=station_data["lat"],
+            lon=station_data["lon"],
+            time=station_data.get("time"),
+        ))
+
     return weather_data
 
 
@@ -170,27 +175,29 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     if not station_cache:
         return _empty_observation()
 
-    best_station_id = max(
-        station_cache,
-        key=lambda sid: station_cache[sid]["latest_time"] or "",
+    # Build a list of all stations with their data
+    all_stations = []
+    for sid, sc in station_cache.items():
+        station = _empty_observation()
+        station["station_name"] = sc["info"]["name"]
+        station["lat"] = sc["info"]["lat"]
+        station["lon"] = sc["info"]["lon"]
+        station["time"] = sc["latest_time"]
+        for obs_param, key in _PARAMS:
+            values_dicts = sc["values"].get(key)
+            if values_dicts:
+                val = _to_float_value(values_dicts[0])
+                if val is not None:
+                    station[key] = val
+        all_stations.append(station)
+
+    # Primary values come from the station with the freshest data
+    best_station = max(
+        all_stations,
+        key=lambda s: s.get("time") or "",
     )
 
-    best = station_cache[best_station_id]
-    result = _empty_observation()
-    result["station_name"] = best["info"]["name"]
-    result["lat"] = best["info"]["lat"]
-    result["lon"] = best["info"]["lon"]
-    result["time"] = best["latest_time"]
-
-    # Extract values from the best station
-    for obs_param, key in _PARAMS:
-        values_dicts = best["values"].get(key)
-        if values_dicts:
-            val = _to_float_value(values_dicts[0])
-            if val is not None:
-                result[key] = val
-
-    return result
+    return {"_primary": best_station, "_all": all_stations}
 
 
 # ---------------------------------------------------------------------------
