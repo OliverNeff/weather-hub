@@ -11,6 +11,7 @@ from wetterdienst.provider.dwd.observation import DwdObservationRequest
 from wetterdienst.provider.dwd.mosmix import DwdMosmixRequest
 from wetterdienst.settings import Settings
 
+from app.adapter.openmeteo import fetch_uv_index
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 
@@ -29,8 +30,6 @@ _MOSMIX_WIND_SPEED = "hourly/small/wind_speed"
 _MOSMIX_WIND_GUST = "hourly/small/wind_gust_max_last_1h"
 # Niederschlagsmenge signifikanten Wetter (mm) pro Stunde
 _MOSMIX_PRECIPITATION = "hourly/small/precipitation_height_significant_weather_last_1h"
-# Globalstrahlung in J/m^2 -- fuer UV-Index-Approximation
-_MOSMIX_RADIATION = "hourly/small/radiation_global"
 
 # ---------------------------------------------------------------------------
 # DWD-Observation-Parameter (Met stationsweise Beobachtung)
@@ -54,6 +53,7 @@ async def fetch_wetterdienst_weather(
     """
     obs = _fetch_observation(latitude, longitude)
     fc = _fetch_forecast(latitude, longitude)
+    uv = await fetch_uv_index(latitude, longitude)
 
     weather_station = WeatherStation(
         source="dwd",
@@ -88,8 +88,7 @@ async def fetch_wetterdienst_weather(
         # Temperatur (C -- DWD Observation liefert C)
         temperature=obs["temperature"],
         feels_like=None,  # DWD liefert keine gefuehlte Temperatur
-        # UV-Index (approximiert aus Globalstrahlung in J/m^2)
-        uv_index=fc["uv_index"],
+        uv_index=uv,
         sun_elevation=None,
     )
 
@@ -184,14 +183,12 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
     Jede Zeile hat {parameter, date, value} — nicht als separate Spalten pro Parameter.
     """
     param_precipitation = "precipitation_height_significant_weather_last_1h"
-    param_radiation = "radiation_global"
 
     request = DwdMosmixRequest(
         parameters=[
             _MOSMIX_TEMPERATURE,
             _MOSMIX_WIND_SPEED,
             _MOSMIX_PRECIPITATION,
-            _MOSMIX_RADIATION,
             _MOSMIX_WIND_GUST,  # fuer evtl. spaetere Nutzung
         ],
         settings=_SETTINGS,
@@ -212,7 +209,6 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
 
     # Long-Format: nach Parameter filtern
     precip_rows = [r for r in values_dicts if r["parameter"] == param_precipitation]
-    radiation_rows = [r for r in values_dicts if r["parameter"] == param_radiation]
 
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     forecast: dict[str, Any] = {
@@ -222,7 +218,6 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
         "intensity_1h": None,
         "precip_2h": None,
         "intensity_2h": None,
-        "uv_index": None,
     }
 
     # Prognose-Fenster (naechste 2 Stunden)
@@ -248,18 +243,6 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
             mean_intensity = sum(precip_values) / len(precip_values)
             forecast[f"precip_{label}"] = round(mean_intensity, 2)
             forecast[f"intensity_{label}"] = round(mean_intensity, 2)
-
-    # UV-Index aus Globalstrahlung (J/m^2): approx. * 0.019 -> Index 0-16+
-    radiation_values: list[float] = []
-    for r in radiation_rows:
-        val = _to_float_value(r)
-        if val is not None:
-            radiation_values.append(val)
-
-    if radiation_values and forecast["uv_index"] is None:
-        mean_rad_jm2 = sum(radiation_values) / len(radiation_values)
-        uv_approx = round(mean_rad_jm2 * 0.019, 1)
-        forecast["uv_index"] = min(max(uv_approx, 0), 16)
 
     return forecast
 
@@ -322,7 +305,6 @@ def _empty_forecast() -> dict[str, Any]:
         "intensity_1h": None,
         "precip_2h": None,
         "intensity_2h": None,
-        "uv_index": None,
     }
 
 
