@@ -1,3 +1,6 @@
+import logging
+import pathlib
+import shutil
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -10,10 +13,11 @@ from wetterdienst.settings import Settings
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 
-# Disable wetterdienst's fsspec cache — stale listings cause
-# "does not have a list of files" errors when the DWD server adds
-# new station zips between cache refreshes.
-_SETTINGS = Settings(cache_disable=True)
+_logger = logging.getLogger(__name__)
+
+# Cache-enabled by default. If cache_disable=True is set (e.g. via env or
+# settings file), fsspec caching is skipped and cache-retry is a no-op.
+_SETTINGS = Settings()
 
 # ---------------------------------------------------------------------------
 # MosMix-Parameter (DWD-MOSMIX-Messmodelldaten)
@@ -58,10 +62,6 @@ async def fetch_wetterdienst_weather(
     )
 
     def _precip_bool(key: str) -> bool | None:
-        """
-        True wenn Niederschlag erwartet wird, False wenn nicht.
-        None wenn keine Daten verfuegbar sind.
-        """
         val = fc[key]
         if val is None:
             return None
@@ -127,14 +127,10 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         settings=_SETTINGS,
     )
 
-    # filter_by_rank is buggy (returns all stations), so we use a large
-    # distance and take the single nearest station.
-    station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
-
-    if len(station_df) == 0:
+    first = _find_nearest_station(request, lat, lon)
+    if first is None:
         return _empty_observation()
 
-    first = station_df.row(0, named=True)
     station_id = first["station_id"]
     result = _empty_observation()
     result["station_name"] = first["name"]
@@ -167,7 +163,6 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
                 latest_time = rows[0]["date"]
 
     result["time"] = latest_time
-
     return result
 
 
@@ -201,13 +196,10 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
         settings=_SETTINGS,
     )
 
-    # Nearest station, no radius limit.
-    station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
-
-    if len(station_df) == 0:
+    first = _find_nearest_station(request, lat, lon)
+    if first is None:
         return _empty_forecast()
 
-    first = station_df.row(0, named=True)
     station_id = first["station_id"]
 
     # MosMix Small — Daten abrufen, long format: {parameter, date, value}
@@ -274,6 +266,43 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Hilfsfunktionen
 # ---------------------------------------------------------------------------
+
+
+def _clear_cache() -> None:
+    """Remove the wetterdienst fsspec cache directory so stale
+    station listings are refreshed on the next request."""
+    if _SETTINGS.cache_disable:
+        return
+    cache = pathlib.Path(_SETTINGS.cache_dir)
+    if cache.exists():
+        _logger.info("Clearing wetterdienst cache: %s", cache)
+        shutil.rmtree(cache)
+
+
+def _find_nearest_station(
+    request: DwdObservationRequest | DwdMosmixRequest,
+    lat: float,
+    lon: float,
+) -> Any:
+    """Return the nearest station row.
+
+    On fsspec cache errors (stale listings), the cache is cleared and
+    the request retried once.
+    """
+    try:
+        station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
+    except Exception as exc:
+        if "does not have a list of files" in str(exc):
+            _logger.warning("Stale cache detected, clearing and retrying: %s", exc)
+            _clear_cache()
+            station_df = request.filter_by_distance(latlon=(lat, lon), distance=9999).df.head(1)
+        else:
+            raise
+
+    if len(station_df) == 0:
+        return None
+
+    return station_df.row(0, named=True)
 
 
 def _empty_observation() -> dict[str, Any]:
