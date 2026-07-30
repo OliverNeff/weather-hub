@@ -72,6 +72,7 @@ async def fetch_buienradar_weather(
         precipitation_intensity_next_2h = max(data_2h)
 
     precip_mm = station.get("precipitation")
+    # Buienradar precipitation is in mm/h.
     weather_data = WeatherData(
         time=datetime.now(timezone.utc),
         # Wind (Buienradar gibt m/s an → unverändert übernehmen)
@@ -80,6 +81,7 @@ async def fetch_buienradar_weather(
 
         # Regen
         precipitation_amount=precip_mm,
+        precipitation_intensity=precip_mm,
 
         # Regen – 30 Minuten
         precipitation_next_30m=precipitation_next_30m,

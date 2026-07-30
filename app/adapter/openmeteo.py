@@ -51,12 +51,14 @@ async def fetch_openmeteo_weather(
     weather_time = _parse_iso(current.get("time"))
 
     precip = _sf(current, "precipitation")
+    # Open-Meteo precipitation is already mm/h, so it maps to both amount and intensity.
     weather_data = WeatherData(
         temperature=_sf(current, "temperature_2m"),
         feels_like=_sf(current, "apparent_temperature"),
         wind_speed=_kmh(_sf(current, "wind_speed_10m")),
         wind_gust=_kmh(_sf(current, "wind_gusts_10m")),
         precipitation_amount=precip,
+        precipitation_intensity=precip,
         uv_index=_sf(current, "uv_index"),
         sun_elevation=sun_elevation,
         sunrise=sunrise_dt,

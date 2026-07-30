@@ -18,6 +18,7 @@ _MERGEABLE_FIELDS = [
     "wind_speed",
     "wind_gust",
     "precipitation_amount",
+    "precipitation_intensity",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",
     "precipitation_intensity_next_30m",
@@ -41,6 +42,7 @@ _CONSERVATIVE_FIELDS = {
     "wind_speed",
     "wind_gust",
     "precipitation_amount",
+    "precipitation_intensity",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",
     "precipitation_intensity_next_30m",
@@ -131,11 +133,11 @@ async def get_weather_data(
             val = _pick_first(fresh, field)
         setattr(merged, field, val)
 
-    # Compute precipitation_now: True if max measured amount across adapters > 0.
+    # Compute precipitation_now: True if max measured intensity across adapters > 0.
     # DWD adapter already filters out stale observation data (>2h old).
-    precip_amount = merged.precipitation_amount
-    if precip_amount is not None:
-        merged.precipitation_now = precip_amount > 0
+    precip_intensity = merged.precipitation_intensity
+    if precip_intensity is not None:
+        merged.precipitation_now = precip_intensity > 0
 
     # Collect stations from whichever adapter returned data.
     for wd in (dwd, buienradar, openmeteo):
