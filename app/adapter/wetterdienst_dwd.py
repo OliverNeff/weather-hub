@@ -32,17 +32,22 @@ class _WdSettings(Settings):
 
 _SETTINGS = _WdSettings(cache_disable=not _DWD_CACHE_ENABLED)
 
+# Disable fsspec HTTP directory listing cache globally — stale listings
+# cause "does not have a list of files" errors when the DWD server adds
+# new station ZIPs between cache refreshes.  We always fetch fresh.
+try:
+    _http_fs = fsspec.filesystem("http")
+    _http_fs.use_listings_cache = False
+except Exception:
+    pass
+
 
 def _clear_dwd_cache():
-    """
-    Clear both fsspec HTTP directory listing cache and the optional
-    on-disk cache so wetterdienst fetches fresh station lists.
-    """
-    # In-memory directory listing cache — the root cause of
-    # "does not have a list of files" errors.
+    """Clear the fsspec HTTP directory listing cache and optional on-disk cache."""
+    # In-memory directory listing cache.
     try:
         fs = fsspec.filesystem("http")
-        fs.invalidate_cache()
+        fs.dircache.clear()
     except Exception:
         pass
 
