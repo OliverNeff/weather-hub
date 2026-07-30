@@ -10,43 +10,41 @@ Weather Hub is a FastAPI microservice that fetches weather data (current conditi
 
 - **Runtime**: Python 3.14+ (managed by `uv`)
 - **Framework**: FastAPI [standard](pyproject.toml) (includes uvicorn, starlette, pydantic)
-- **Weather providers**: `buienradar` (1.0.9), `wetterdienst` (DWD/MosMix)
-- **Utilities**: `haversine` (distance), `pandas` (MosMix datetime parsing)
+- **Weather providers**: `buienradar` (1.0.9), `wetterdienst` (DWD/MosMix), `httpx` (Open-Meteo)
+- **Utilities**: `haversine` (distance), `polars` (data processing)
 - **Package manager**: `uv` (see `uv.lock`)
 
 ## Directory Structure
 
 ```
 app/
-├── main.py                        # FastAPI app entry point, mounts routers
+├── main.py                        # FastAPI app entry point, logging setup
 ├── routers/
 │   └── weather_data.py            # GET /weather/data?lat=&lon=
 ├── models/
-│   ├── weather_data.py            # WeatherData Pydantic response model
+│   ├── weather_data.py            # WeatherData Pydantic response schema
 │   └── weather_station.py         # WeatherStation Pydantic model
 └── adapter/
-    ├── buinradar.py               # Buienradar API client (fetch + parse)
-    └── wetterdienst_dwd.py        # DWD client (Observation + MosMix forecast)
+    ├── buinradar.py               # Buienradar API client
+    ├── wetterdienst_dwd.py        # DWD client (Observation + MosMix forecast)
+    └── openmeteo.py               # Open-Meteo client (plain httpx, no FFI)
 ```
 
 ## Key Commands
 
 ```bash
-# Install deps and run the server (dev mode with auto-reload)
-uv run fastapi dev app/main.py
-
-# Or directly with uvicorn
+# Run the server (use uvicorn, not fastapi dev — see "Known issues")
 uv run uvicorn app.main:app --reload
 
 # Run a quick API smoke test
-uv run python -c "import httpx; print(httpx.get('http://127.0.0.1:8000/weather/data?lat=52.37&lon=4.89').json())"
+uv run python -c "import httpx; print(httpx.get('http://127.0.0.1:8000/weather/data?lat=49.87&lon=8.93').json())"
 ```
 
 ## Architecture
 
 The app follows a thin layered architecture:
 
-1. **Router** (`app/routers/`) — HTTP layer. Receives `lat`/`lon` query params, delegates to an adapter, returns a Pydantic model.
+1. **Router** (`app/routers/`) — HTTP layer. Fetches all adapters in parallel, merges results, returns a Pydantic model.
 2. **Adapter** (`app/adapter/`) — external-API clients. Each provider has its own adapter module. They fetch raw data, parse it, and map to `WeatherData`.
 3. **Models** (`app/models/`) — Pydantic `BaseModel` classes that define the API response schema. All fields are nullable (`float | None`) because weather stations don't always report every measurement.
 
@@ -54,19 +52,28 @@ The only public endpoint is `GET /weather/data?lat=...&lon=...`.
 
 ### Adapters
 
-The router currently delegates to `fetch_wetterdienst_weather` (DWD). A Buienradar adapter exists (`fetch_buienradar_weather`) but is not currently routed.
+Three adapters run in parallel per request. A single adapter failure doesn't take down the response.
 
 **DWD Adapter** (`wetterdienst_dwd.py`): Combines two DWD sources:
-- **Observation** (`DwdObservationRequest`): Current measurements (temperature, wind, precipitation) from `recent` period at `10_minutes` resolution. Finds nearest station via `filter_by_distance(rank=5)` + haversine.
-- **Forecast** (`DwdMosmixRequest`): Hourly MosMix Small prognoses for precipitation and radiation. Builds 30m/1h/2h windows from now, averages the precip values in each window for amount and intensity. UV index is approximated from global radiation (J/m²) with `* 0.019` factor, clamped to 0-16.
+- **Observation** (`DwdObservationRequest`): Fetches temperature, wind speed, wind gust, and precipitation from `recent` period at `10_minutes` resolution. Each parameter is fetched in a separate request targeting the nearest station that reports it (not all stations report all parameters). The 4 parameter requests run in parallel via `ThreadPoolExecutor`.
+- **Forecast** (`DwdMosmixRequest`): Hourly MosMix Small prognoses for precipitation and radiation. Builds 30m/1h/2h windows from now, averages the precip values in each window for amount and intensity. UV index is approximated from global radiation (J/m²) with `* 0.019` factor, clamped to 0-16 — this is a rough estimate, not a real UV measurement.
+- **Station selection**: picks the 3 nearest stations by distance, not by dataset count. Proximity matters most for local rain/wind accuracy. Logs which stations are selected and which are skipped.
+
+**Open-Meteo Adapter** (`openmeteo.py`): Calls the Open-Meteo forecast API via plain `httpx` (not the `openmeteo_requests` FFI client). Provides current temperature, apparent temperature, wind, precipitation, UV index (accurate), plus sunrise/sunset with sun elevation. Typical response time: <1s.
 
 **Buienradar Adapter** (`buinradar.py`): Calls `buienradar.buienradar.get_data()`, parses the JSON `content` string and `raincontent` grid. Rain content uses integer codes per 5-minute interval, converted via `to_mmh()`: `10 ** ((code - 109) / 32)`. Station lookup uses Euclidean distance (not haversine).
 
-### Models
+### Response merging (`weather_data.py`)
 
-`WeatherData` contains: current conditions (wind, precipitation, temperature, feels_like, uv_index, sun_elevation), plus forecast windows for 30m/1h/2h (boolean `precipitation_next_X`, float `precipitation_amount_next_X`, float `precipitation_intensity_next_X`).
+The router fetches all 3 adapters in parallel, then merges:
+- **Wind + precipitation**: `max()` across all adapters (conservative — over-reporting is safer)
+- **Feels like**: prefers Open-Meteo's `apparent_temperature`, falls back to freshest source
+- **Temperature, UV, sun data**: freshest source (newest timestamp first)
+- **Stations**: collected from all adapters that returned data
 
-`WeatherData.stations` is a `list[WeatherStation]` (not a single field), populated via `append()` after model construction.
+### MosMix caching
+
+MosMix forecast data is cached in-memory with a 10-minute TTL (`_mosmix_cache`). Forecasts update every 1-3 hours; a fresh MosMix fetch takes ~11s. Cache key is `{lat:.2f},{lon:.2f}`.
 
 ## Windows SSL Configuration
 
@@ -91,5 +98,11 @@ pointing to a single corporate cert break uv's TLS chain validation against pypi
 - Buienradar's `content` field is a JSON string (not already-parsed dict) — it must be `json.loads()`-ed before use (see `app/adapter/buinradar.py:25`).
 - `WeatherData.stations` is a `list[WeatherStation]`, populated via `append()` after model construction.
 - Stations with no data should return `None` fields (not 0), preserving the distinction between "no data" and "zero precipitation".
-- DWD `_to_float()` helper handles NaN values by checking `f != f` (see `app/adapter/wetterdienst_dwd.py:284`).
-- MosMix datetime parsing falls back through `pd.Timestamp()` for various formats (see `_parse_datetime()`).
+- DWD `_to_float()` helper handles NaN values by checking `f != f` (see `app/adapter/wetterdienst_dwd.py`).
+
+## Known issues
+
+- **`fastapi dev` crashes on Windows**: the `rich_toolkit` console in `fastapi_cli` uses the system encoding (cp1252 on German Windows). Station names with non-ASCII characters (`Großostheim`) cause a `UnicodeEncodeError`. Use `uv run uvicorn app.main:app --reload` instead.
+- **DWD observation data is stale**: DWD `recent` period data for small stations can be 12+ hours old. Temperature/wind may only be available from stations 20km+ away. The merge layer prefers Open-Meteo's fresher data for temperature and UV.
+- **DWD MosMix UV index is inaccurate**: the `* 0.019` factor from global radiation gives a rough approximation (e.g., returns 1.6 when real UV is 6). Open-Meteo provides the accurate UV index and takes precedence via the freshness-based merge.
+- **DWD `.values.all()` loads full station ZIPs**: even when requesting a single parameter, wetterdienst downloads the entire station data file. The per-parameter approach (4 parallel requests) is faster than one combined request with 3 station ZIPs (~4s vs ~40s).

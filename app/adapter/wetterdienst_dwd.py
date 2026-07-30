@@ -1,5 +1,8 @@
 import asyncio
+import logging
 import math
+import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -13,10 +16,31 @@ from wetterdienst.settings import Settings
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 
-# Disable wetterdienst's fsspec cache — stale listings cause
+logger = logging.getLogger(__name__)
+
+# DWD cache: controlled by DWD_CACHE env var (.env).
+# Defaults to disabled — stale fsspec cache causes
 # "does not have a list of files" errors when the DWD server adds
 # new station zips between cache refreshes.
-_SETTINGS = Settings(cache_disable=True)
+_DWD_CACHE_ENABLED = os.environ.get("DWD_CACHE", "false").lower() == "true"
+
+# Subclass Settings with env_file=None so pydantic-settings doesn't
+# scan .env itself (which would reject our DWD_CACHE var as extra).
+class _WdSettings(Settings):
+    model_config = {"env_file": None}
+
+_SETTINGS = _WdSettings(cache_disable=not _DWD_CACHE_ENABLED)
+
+
+def _clear_dwd_cache():
+    """Remove wetterdienst's fsspec cache directory so the next request fetches fresh."""
+    cache_dir = _SETTINGS.cache_dir
+    if cache_dir and os.path.isdir(cache_dir):
+        try:
+            shutil.rmtree(cache_dir)
+            logger.info("dwd: cleared stale fsspec cache at %s", cache_dir)
+        except Exception as e:
+            logger.warning("dwd: failed to clear cache dir: %s", e)
 
 # ---------------------------------------------------------------------------
 # MosMix-Parameter (DWD-MOSMIX-Messmodelldaten)
@@ -103,108 +127,93 @@ async def fetch_wetterdienst_weather(
 
 def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     """
-    Holt die neuesten Messwerte von 3 nächsten Stationen.
-    Alle 4 Datasets werden in einem combined Request abgefragt.
-    Die Werte der Stationen werden parallel abgerufen.
+    Holt die neuesten Messwerte für jeden Parameter von der jeweils
+    nächstgelegenen Station die diesen Parameter bereitstellt.
+    Alle 4 Parameter werden parallel abgerufen.
     """
     start_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    try:
-        req = DwdObservationRequest(
-            parameters=[f"10_minutes/{ds}" for ds, _, _ in _OBS_DATASETS],
-            periods="recent",
-            start_date=start_date,
-            end_date=end_date,
-            settings=_SETTINGS,
-        )
-        station_df = req.filter_by_distance(latlon=(lat, lon), distance=50.0).df
-    except Exception:
-        return _empty_observation()
-
-    if len(station_df) == 0:
-        return _empty_observation()
-
-    # Pick 3 unique stations: prefer those with more datasets, then nearest
-    grouped = station_df.group_by("station_id").agg(
-        pl.col("distance").min().alias("min_distance"),
-        pl.col("dataset").n_unique().alias("num_datasets"),
-    )
-    top = grouped.sort(["num_datasets", "min_distance"], descending=[True, False]).head(3)
-    selected_ids = [row["station_id"] for row in top.iter_rows(named=True)]
-
-    # Build station info map (from the combined station list)
-    station_info: dict[str, dict] = {}
-    for row in station_df.sort("distance").iter_rows(named=True):
-        sid = row["station_id"]
-        if sid not in station_info:
-            station_info[sid] = {
-                "name": row["name"],
-                "lat": row["latitude"],
-                "lon": row["longitude"],
-            }
-
-    def _fetch_station_values(sid: str) -> tuple[str, dict]:
-        """Fetch all values for a station, keyed by parameter name."""
+    def _fetch_param(ds, result_key, param_name):
+        """Find nearest station with this dataset, return latest value."""
         try:
+            req = DwdObservationRequest(
+                parameters=[f"10_minutes/{ds}"],
+                periods="recent",
+                start_date=start_date,
+                end_date=end_date,
+                settings=_SETTINGS,
+            )
+            sdf = req.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+            if len(sdf) == 0:
+                return (result_key, None)
+            row = sdf.sort("distance").row(0, named=True)
+            sid = row["station_id"]
             vals = req.filter_by_station_id(station_id=sid).values.all().df
-            if len(vals) == 0:
-                return (sid, {})
-            return (sid, {row["parameter"]: row for row in vals.sort("date", descending=True).iter_rows(named=True)})
+            sub = vals.filter(vals["parameter"] == param_name)
+            if len(sub) == 0:
+                return (result_key, None)
+            latest = sub.sort("date", descending=True).row(0, named=True)
+            val = _to_float_value({"value": latest["value"]})
+            return (result_key, val, latest["date"], sid, row["name"],
+                    row["latitude"], row["longitude"], row["distance"])
         except Exception:
-            return (sid, {})
+            return (result_key, None)
 
     results = []
-    with ThreadPoolExecutor(max_workers=len(selected_ids)) as pool:
-        futs = [pool.submit(_fetch_station_values, sid) for sid in selected_ids]
+    with ThreadPoolExecutor(max_workers=len(_OBS_DATASETS)) as pool:
+        futs = [pool.submit(_fetch_param, ds, rk, pm) for ds, rk, pm in _OBS_DATASETS]
         results = [f.result() for f in futs]
-    station_values = dict(results)
 
-    # Extract values per station
-    station_cache: dict[str, dict] = {}
-    for sid in selected_ids:
-        vals_dict = station_values.get(sid, {})
-        if not vals_dict:
+    # If cache is enabled and all params returned None, cache is likely stale.
+    # Clear it and retry once.
+    if _DWD_CACHE_ENABLED and all(r[1] is None for r in results):
+        logger.warning("dwd: all 4 params returned None — clearing cache and retrying")
+        _clear_dwd_cache()
+        with ThreadPoolExecutor(max_workers=len(_OBS_DATASETS)) as pool:
+            futs = [pool.submit(_fetch_param, ds, rk, pm) for ds, rk, pm in _OBS_DATASETS]
+            results = [f.result() for f in futs]
+
+    # Collect values and station info
+    primary = _empty_observation()
+    stations_seen: dict[str, dict] = {}
+    for r in results:
+        result_key = r[0]
+        if len(r) < 2 or r[1] is None:
             continue
+        primary[result_key] = r[1]
+        if r[2] and (primary.get("time") is None or r[2] > primary.get("time")):
+            primary["time"] = r[2]
+        if len(r) >= 8:
+            sid = r[3]
+            if sid not in stations_seen:
+                stations_seen[sid] = {
+                    "station_name": r[4],
+                    "lat": r[5],
+                    "lon": r[6],
+                    "distance": r[7],
+                    "time": None,
+                    "temperature": None,
+                    "wind_speed": None,
+                    "wind_gust": None,
+                    "precipitation": None,
+                }
+            stations_seen[sid]["time"] = r[2]
+            stations_seen[sid][result_key] = r[1]
 
-        info = station_info.get(sid, {})
-        cache = {
-            "info": {"name": info.get("name"), "lat": info.get("lat"), "lon": info.get("lon")},
-            "values": {},
-            "latest_time": None,
-        }
+    # Log which stations contributed data
+    if stations_seen:
+        logger.info(
+            "dwd: used %d station(s) for observation: %s",
+            len(stations_seen),
+            ", ".join(f"{v['station_name']}({v.get('distance', 0):.1f}km)" for v in sorted(stations_seen.values(), key=lambda s: s.get('distance', 0))),
+        )
 
-        for _, result_key, param_name in _OBS_DATASETS:
-            if param_name in vals_dict:
-                row = vals_dict[param_name]
-                val = _to_float_value(row)
-                if val is not None:
-                    cache["values"][result_key] = val
-                if cache["latest_time"] is None:
-                    cache["latest_time"] = row.get("date")
-
-        if cache["info"].get("name"):
-            station_cache[sid] = cache
-
-    if not station_cache:
+    all_stations = sorted(stations_seen.values(), key=lambda s: s.get('distance', 0))
+    if primary["temperature"] is None and primary["wind_speed"] is None:
         return _empty_observation()
 
-    # Build station list with extracted values
-    all_stations = []
-    for sid, sc in station_cache.items():
-        station = _empty_observation()
-        station["station_name"] = sc["info"]["name"]
-        station["lat"] = sc["info"]["lat"]
-        station["lon"] = sc["info"]["lon"]
-        station["time"] = sc["latest_time"]
-        for key in ["temperature", "wind_speed", "wind_gust", "precipitation"]:
-            if key in sc["values"]:
-                station[key] = sc["values"][key]
-        all_stations.append(station)
-
-    best_station = max(all_stations, key=lambda s: s.get("time") or "")
-
-    return {"_primary": best_station, "_all": all_stations}
+    return {"_primary": primary, "_all": all_stations}
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +247,15 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
     try:
         station_df = request.filter_by_distance(latlon=(lat, lon), distance=50.0).df
     except Exception:
-        return _empty_forecast()
+        if _DWD_CACHE_ENABLED:
+            logger.warning("dwd: forecast station lookup failed — clearing cache and retrying")
+            _clear_dwd_cache()
+            try:
+                station_df = request.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+            except Exception:
+                return _empty_forecast()
+        else:
+            return _empty_forecast()
 
     if len(station_df) == 0:
         return _empty_forecast()
