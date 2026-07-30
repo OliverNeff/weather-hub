@@ -319,12 +319,19 @@ def _fetch_station_value(
 # ---------------------------------------------------------------------------
 
 def _get_all_stations() -> list[dict[str, Any]]:
-    """Get a deduplicated list of all stations across all datasets."""
+    """Get a deduplicated list of all stations across all datasets.
+
+    Each station is annotated with ``coverage`` — the number of datasets
+    (temperature, wind, gust, precip) that it provides.  Stations with
+    more coverage are preferred.
+    """
     seen: dict[str, dict[str, Any]] = {}
     for pk in _DATASETS:
         for s in _get_stations_for_param(pk):
             if s["id"] not in seen:
-                seen[s["id"]] = s
+                seen[s["id"]] = dict(s, coverage=1)
+            else:
+                seen[s["id"]]["coverage"] = seen[s["id"]]["coverage"] + 1
     return list(seen.values())
 
 
@@ -337,20 +344,22 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 
     param_keys = ["temperature", "wind_speed", "wind_gust", "precipitation"]
 
-    # Find N nearest stations once — used for all parameters
+    # Find stations — request more candidates than we need (so we can
+    # pick the N that actually have data for all datasets).
     try:
         all_stations = _get_all_stations()
-        targets = _find_nearest_stations(all_stations, lat, lon, count=_NUM_STATIONS)
+        candidates = _find_nearest_stations(all_stations, lat, lon, count=_NUM_STATIONS * 2)
     except Exception as e:
         logger.error("dwd: failed to get station list: %s", e, exc_info=True)
-        targets = []
+        return _empty_observation()
 
-    if not targets:
+    if not candidates:
         logger.warning("dwd: no station found within %s km", _MAX_DISTANCE)
         return _empty_observation()
 
-    # Build a set of station IDs that actually have each dataset
-    station_ids = {s["id"] for s in targets}
+    # Sort by distance asc, then by coverage desc (more data sources first).
+    candidates.sort(key=lambda s: (s["distance"], -s.get("coverage", 0)))
+    targets = candidates[:_NUM_STATIONS]
 
     def _fetch_one(param_key: str) -> list[tuple[str, float | None, datetime | None, dict | None]]:
         """
@@ -411,27 +420,38 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         for f in futs:
             all_results.extend(f.result())
 
-    # DWD recent observation data can be 12+ hours old for small stations.
-    # Discard precipitation data older than 2h to avoid reporting stale values.
-    stale_threshold = datetime.now(timezone.utc) - timedelta(hours=2)
-    discard_precip = False
-    for pk, val, dt, _si in all_results:
-        if pk == "precipitation" and dt and dt < stale_threshold:
-            discard_precip = True
-            logger.warning("dwd: discarding stale precipitation data (timestamp %s)", dt)
-            break
-
-    # Build primary values dict — for each param pick the value from the nearest station
+    # Build primary values dict — for each param pick the freshest value.
+    # All target stations appear in the result, even if they had no usable data.
     primary = _empty_observation()
+    stale_threshold = datetime.now(timezone.utc) - timedelta(hours=2)
+
+    # Initialize station entries for all targets so they always appear.
     stations_seen: dict[str, dict] = {}
+    for st in targets:
+        stations_seen[st["id"]] = {
+            "station_name": st["name"],
+            "lat": st["lat"],
+            "lon": st["lon"],
+            "distance": st["distance"],
+            "time": None,
+            "temperature": None,
+            "wind_speed": None,
+            "wind_gust": None,
+            "precipitation": None,
+        }
 
     for pk, val, dt, station_info in all_results:
         if val is None:
             continue
-        if discard_precip and pk == "precipitation":
+        # Per-value staleness check: discard stale precipitation.
+        if pk == "precipitation" and dt and dt < stale_threshold:
+            logger.warning(
+                "dwd: discarding stale precip for %s (timestamp %s)",
+                station_info["name"] if station_info else "?", dt,
+            )
             continue
-        # Take the first non-None value (stations are ordered by distance)
-        if primary.get(pk) is None:
+        # Only take value if it's fresher than current primary.
+        if primary.get(pk) is None or dt is None or dt > primary.get("time", dt):
             primary[pk] = val
         if dt and (primary.get("time") is None or dt > primary.get("time")):
             primary["time"] = dt
@@ -451,8 +471,7 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
                     "precipitation": None,
                 }
             stations_seen[sid]["time"] = dt
-            if not (discard_precip and pk == "precipitation"):
-                stations_seen[sid][pk] = val
+            stations_seen[sid][pk] = val
 
     # Log which stations contributed data
     if stations_seen:

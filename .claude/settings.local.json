@@ -59,7 +59,13 @@
       "Bash(taskkill //F //IM uvicorn.exe)",
       "Bash(taskkill //F //IM python.exe)",
       "Bash(SSL_CERT_FILE='C:\\\\projects\\\\cert\\\\ManagementCA.pem' PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(pkill -f \"uvicorn\")",
+      "Bash(taskkill /F /IM python.exe /T)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(python3 -m json.tool)",
+      "Bash(tee /tmp/uvicorn.log)"
     ]
   }
 }
