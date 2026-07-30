@@ -17,7 +17,7 @@ router = APIRouter(
 _MERGEABLE_FIELDS = [
     "wind_speed",
     "wind_gust",
-    "precipitation_rate",
+    "precipitation_amount",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",
     "precipitation_intensity_next_30m",
@@ -40,7 +40,7 @@ _MERGEABLE_FIELDS = [
 _CONSERVATIVE_FIELDS = {
     "wind_speed",
     "wind_gust",
-    "precipitation_rate",
+    "precipitation_amount",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",
     "precipitation_intensity_next_30m",
@@ -130,6 +130,12 @@ async def get_weather_data(
             # uv_index, temperature, sun data: freshest source.
             val = _pick_first(fresh, field)
         setattr(merged, field, val)
+
+    # Compute precipitation_now: True if max measured amount across adapters > 0.
+    # DWD adapter already filters out stale observation data (>2h old).
+    precip_amount = merged.precipitation_amount
+    if precip_amount is not None:
+        merged.precipitation_now = precip_amount > 0
 
     # Collect stations from whichever adapter returned data.
     for wd in (dwd, buienradar, openmeteo):

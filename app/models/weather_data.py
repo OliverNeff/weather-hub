@@ -10,7 +10,8 @@ class WeatherData(BaseModel):
     wind_gust: float | None = None                     # m/s – maximale Böe
 
     # Regen (aktuell)
-    precipitation_rate: float | None = None            # mm/h – gemessene Niederschlagsintensität der Station
+    precipitation_now: bool | None = None              # True wenn gerade Niederschlag gemessen oder sofort erwartet wird
+    precipitation_amount: float | None = None          # mm – gemessene Niederschlagsmenge (letzter Zeitraum)
 
     # Regen (Vorhersage)
 

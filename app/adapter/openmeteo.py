@@ -50,12 +50,13 @@ async def fetch_openmeteo_weather(
     forecast = _parse_hourly_precipitation(hourly, now)
     weather_time = _parse_iso(current.get("time"))
 
+    precip = _sf(current, "precipitation")
     weather_data = WeatherData(
         temperature=_sf(current, "temperature_2m"),
         feels_like=_sf(current, "apparent_temperature"),
         wind_speed=_kmh(_sf(current, "wind_speed_10m")),
         wind_gust=_kmh(_sf(current, "wind_gusts_10m")),
-        precipitation_rate=_sf(current, "precipitation"),
+        precipitation_amount=precip,
         uv_index=_sf(current, "uv_index"),
         sun_elevation=sun_elevation,
         sunrise=sunrise_dt,

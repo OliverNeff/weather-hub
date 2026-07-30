@@ -88,10 +88,11 @@ async def fetch_wetterdienst_weather(
             return None
         return val > 0
 
+    precip_val = primary["precipitation"]
     weather_data = WeatherData(
         wind_speed=primary["wind_speed"],
         wind_gust=primary["wind_gust"],
-        precipitation_rate=primary["precipitation"],
+        precipitation_amount=precip_val,
         precipitation_next_30m=_precip_bool("precip_30m"),
         precipitation_amount_next_30m=fc["precip_30m"],
         precipitation_intensity_next_30m=fc["intensity_30m"],
@@ -174,12 +175,25 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             futs = [pool.submit(_fetch_param, ds, rk, pm) for ds, rk, pm in _OBS_DATASETS]
             results = [f.result() for f in futs]
 
+    # DWD recent observation data can be 12+ hours old for small stations.
+    # Discard precipitation data older than 2h to avoid reporting stale values.
+    _stale_threshold = datetime.now(timezone.utc) - timedelta(hours=2)
+    _discard_precip = False
+    for r in results:
+        if r[0] == "precipitation" and len(r) >= 4 and r[2] and r[2] < _stale_threshold:
+            _discard_precip = True
+            logger.warning("dwd: discarding stale precipitation data (timestamp %s)", r[2])
+            break
+
     # Collect values and station info
     primary = _empty_observation()
     stations_seen: dict[str, dict] = {}
     for r in results:
         result_key = r[0]
         if len(r) < 2 or r[1] is None:
+            continue
+        # Skip stale precipitation data
+        if _discard_precip and result_key == "precipitation":
             continue
         primary[result_key] = r[1]
         if r[2] and (primary.get("time") is None or r[2] > primary.get("time")):
@@ -199,7 +213,8 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
                     "precipitation": None,
                 }
             stations_seen[sid]["time"] = r[2]
-            stations_seen[sid][result_key] = r[1]
+            if not (_discard_precip and result_key == "precipitation"):
+                stations_seen[sid][result_key] = r[1]
 
     # Log which stations contributed data
     if stations_seen:
