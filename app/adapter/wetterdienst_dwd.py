@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
+import fsspec
 import polars as pl
 
 from wetterdienst.provider.dwd.observation import DwdObservationRequest
@@ -33,7 +34,19 @@ _SETTINGS = _WdSettings(cache_disable=not _DWD_CACHE_ENABLED)
 
 
 def _clear_dwd_cache():
-    """Remove wetterdienst's fsspec cache directory so the next request fetches fresh."""
+    """
+    Clear both fsspec HTTP directory listing cache and the optional
+    on-disk cache so wetterdienst fetches fresh station lists.
+    """
+    # In-memory directory listing cache — the root cause of
+    # "does not have a list of files" errors.
+    try:
+        fs = fsspec.filesystem("http")
+        fs.invalidate_cache()
+    except Exception:
+        pass
+
+    # On-disk cache (only when enabled).
     cache_dir = _SETTINGS.cache_dir
     if cache_dir and os.path.isdir(cache_dir):
         try:
