@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
+import fsspec
 import polars as pl
 
 from wetterdienst.provider.dwd.observation import DwdObservationRequest
@@ -18,15 +19,25 @@ from app.models.weather_station import WeatherStation
 
 logger = logging.getLogger(__name__)
 
-# Disable fsspec HTTP directory listing cache at the class level so every
-# HTTPFileSystem instance created by wetterdienst skips the cache.
-# Stale listings cause "does not have a list of files" errors when the
-# DWD server adds new station ZIPs between cache refreshes.
-try:
-    from fsspec.implementations.http import HTTPFileSystem
-    HTTPFileSystem.use_listings_cache = False
-except Exception:
-    pass
+# Patch fsspec so every new HTTPFileSystem instance has listings cache disabled.
+# wetterdienst creates its own instances that don't inherit our settings,
+# so we monkey-patch the constructor to force use_listings_cache=False.
+def _patch_fsspec_http():
+    try:
+        from fsspec.implementations.http import HTTPFileSystem
+
+        orig_init = HTTPFileSystem.__init__
+
+        def patched_init(self, *args, **kwargs):
+            orig_init(self, *args, **kwargs)
+            self.use_listings_cache = False
+
+        HTTPFileSystem.__init__ = patched_init
+    except Exception:
+        pass
+
+
+_patch_fsspec_http()
 
 # DWD cache: controlled by DWD_CACHE env var (.env).
 # Defaults to disabled — stale fsspec cache causes
