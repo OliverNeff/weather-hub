@@ -134,6 +134,7 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     nächstgelegenen Station die diesen Parameter bereitstellt.
     Alle 4 Parameter werden parallel abgerufen.
     """
+    logger.info("dwd: fetching observation for lat=%.2f, lon=%.2f", lat, lon)
     start_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -267,18 +268,19 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
         settings=_SETTINGS,
     )
 
-    try:
-        station_df = request.filter_by_distance(latlon=(lat, lon), distance=50.0).df
-    except Exception:
-        if _DWD_CACHE_ENABLED:
-            logger.warning("dwd: forecast station lookup failed — clearing cache and retrying")
-            _clear_dwd_cache()
-            try:
-                station_df = request.filter_by_distance(latlon=(lat, lon), distance=50.0).df
-            except Exception:
-                return _empty_forecast()
-        else:
+    for attempt in range(2):
+        try:
+            station_df = request.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+            break
+        except Exception as e:
+            if attempt == 0:
+                logger.warning("dwd: forecast station lookup failed: %s — clearing cache and retrying", e)
+                _clear_dwd_cache()
+                continue
+            logger.error("dwd: forecast station lookup failed: %s", e)
             return _empty_forecast()
+    else:
+        return _empty_forecast()
 
     if len(station_df) == 0:
         return _empty_forecast()
