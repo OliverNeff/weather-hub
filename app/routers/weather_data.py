@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
@@ -6,6 +7,8 @@ from fastapi import APIRouter
 from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
 from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
+
+logger = logging.getLogger(__name__)
 from app.models.weather_data import WeatherData
 
 router = APIRouter(
@@ -90,7 +93,8 @@ async def _safe_fetch(func, lat, lon):
     """Call an adapter; on failure return an empty WeatherData."""
     try:
         return await func(latitude=lat, longitude=lon)
-    except Exception:
+    except Exception as e:
+        logger.error("adapter %s failed: %s", func.__name__, e, exc_info=True)
         return WeatherData()
 
 

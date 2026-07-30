@@ -160,7 +160,8 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             val = _to_float_value({"value": latest["value"]})
             return (result_key, val, latest["date"], sid, row["name"],
                     row["latitude"], row["longitude"], row["distance"])
-        except Exception:
+        except Exception as e:
+            logger.error("dwd: failed to fetch %s: %s", result_key, e)
             return (result_key, None)
 
     results = []
