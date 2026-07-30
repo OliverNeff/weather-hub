@@ -89,10 +89,13 @@ async def fetch_wetterdienst_weather(
         return val > 0
 
     precip_val = primary["precipitation"]
+    # DWD precipitation_height is mm per 10 min; intensity is mm/h.
+    precip_intensity = round(precip_val * 6, 1) if precip_val is not None else None
     weather_data = WeatherData(
         wind_speed=primary["wind_speed"],
         wind_gust=primary["wind_gust"],
         precipitation_amount=precip_val,
+        precipitation_intensity=precip_intensity,
         precipitation_next_30m=_precip_bool("precip_30m"),
         precipitation_amount_next_30m=fc["precip_30m"],
         precipitation_intensity_next_30m=fc["intensity_30m"],
