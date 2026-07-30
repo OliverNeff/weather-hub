@@ -139,30 +139,35 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 
     def _fetch_param(ds, result_key, param_name):
         """Find nearest station with this dataset, return latest value."""
-        try:
-            req = DwdObservationRequest(
-                parameters=[f"10_minutes/{ds}"],
-                periods="recent",
-                start_date=start_date,
-                end_date=end_date,
-                settings=_SETTINGS,
-            )
-            sdf = req.filter_by_distance(latlon=(lat, lon), distance=50.0).df
-            if len(sdf) == 0:
+        for attempt in range(2):
+            try:
+                req = DwdObservationRequest(
+                    parameters=[f"10_minutes/{ds}"],
+                    periods="recent",
+                    start_date=start_date,
+                    end_date=end_date,
+                    settings=_SETTINGS,
+                )
+                sdf = req.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+                if len(sdf) == 0:
+                    return (result_key, None)
+                row = sdf.sort("distance").row(0, named=True)
+                sid = row["station_id"]
+                vals = req.filter_by_station_id(station_id=sid).values.all().df
+                sub = vals.filter(vals["parameter"] == param_name)
+                if len(sub) == 0:
+                    return (result_key, None)
+                latest = sub.sort("date", descending=True).row(0, named=True)
+                val = _to_float_value({"value": latest["value"]})
+                return (result_key, val, latest["date"], sid, row["name"],
+                        row["latitude"], row["longitude"], row["distance"])
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning("dwd: %s attempt 1 failed: %s — retrying", result_key, e)
+                    _clear_dwd_cache()
+                    continue
+                logger.error("dwd: failed to fetch %s: %s", result_key, e)
                 return (result_key, None)
-            row = sdf.sort("distance").row(0, named=True)
-            sid = row["station_id"]
-            vals = req.filter_by_station_id(station_id=sid).values.all().df
-            sub = vals.filter(vals["parameter"] == param_name)
-            if len(sub) == 0:
-                return (result_key, None)
-            latest = sub.sort("date", descending=True).row(0, named=True)
-            val = _to_float_value({"value": latest["value"]})
-            return (result_key, val, latest["date"], sid, row["name"],
-                    row["latitude"], row["longitude"], row["distance"])
-        except Exception as e:
-            logger.error("dwd: failed to fetch %s: %s", result_key, e)
-            return (result_key, None)
 
     results = []
     with ThreadPoolExecutor(max_workers=len(_OBS_DATASETS)) as pool:
