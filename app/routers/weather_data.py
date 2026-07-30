@@ -17,7 +17,6 @@ router = APIRouter(
 _MERGEABLE_FIELDS = [
     "wind_speed",
     "wind_gust",
-    "precipitation_amount",
     "precipitation_intensity",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",
@@ -41,7 +40,6 @@ _MERGEABLE_FIELDS = [
 _CONSERVATIVE_FIELDS = {
     "wind_speed",
     "wind_gust",
-    "precipitation_amount",
     "precipitation_intensity",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",

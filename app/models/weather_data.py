@@ -11,7 +11,6 @@ class WeatherData(BaseModel):
 
     # Regen (aktuell)
     precipitation_now: bool | None = None              # True wenn gerade Niederschlag gemessen oder sofort erwartet wird
-    precipitation_amount: float | None = None          # mm – gemessene Niederschlagsmenge (letzter Zeitraum)
     precipitation_intensity: float | None = None       # mm/h – gemessene Regenintensität
 
     # Regen (Vorhersage)
