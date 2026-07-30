@@ -1,8 +1,10 @@
+import asyncio
 import math
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-import pandas as pd
+import polars as pl
 
 from wetterdienst.provider.dwd.observation import DwdObservationRequest
 from wetterdienst.provider.dwd.mosmix import DwdMosmixRequest
@@ -18,19 +20,27 @@ _SETTINGS = Settings(cache_disable=True)
 
 # ---------------------------------------------------------------------------
 # MosMix-Parameter (DWD-MOSMIX-Messmodelldaten)
-# Format: resolution/dataset/parameter
 # ---------------------------------------------------------------------------
 _MOSMIX_PRECIPITATION = "hourly/small/precipitation_height_significant_weather_last_1h"
 _MOSMIX_RADIATION = "hourly/small/radiation_global"
 
 # ---------------------------------------------------------------------------
 # DWD-Observation-Parameter (Met stationsweise Beobachtung)
-# Format: resolution/dataset/parameter
+# Format: resolution/dataset (wetterdienst v2)
 # ---------------------------------------------------------------------------
-_OBS_TEMPERATURE = "10_minutes/temperature_air/temperature_air_mean_2m"
-_OBS_WIND_SPEED = "10_minutes/wind/wind_speed"
-_OBS_WIND_GUST = "10_minutes/wind_extreme/wind_gust_max"
-_OBS_PRECIPITATION = "10_minutes/precipitation/precipitation_height"
+_OBS_DATASETS = [
+    ("temperature_air", "temperature", "temperature_air_mean_2m"),
+    ("wind", "wind_speed", "wind_speed"),
+    ("wind_extreme", "wind_gust", "wind_gust_max"),
+    ("precipitation", "precipitation", "precipitation_height"),
+]
+
+# ---------------------------------------------------------------------------
+# In-process cache for MosMix forecasts (TTL 10min)
+# Forecasts update every 1-3 hours; fresh requests take ~7s to fetch.
+# ---------------------------------------------------------------------------
+_mosmix_cache: dict[str, tuple[datetime, pl.DataFrame]] = {}
+_MOSMIX_CACHE_TTL = timedelta(minutes=10)
 
 
 async def fetch_wetterdienst_weather(
@@ -38,17 +48,15 @@ async def fetch_wetterdienst_weather(
 ) -> WeatherData:
     """
     Holt aktuelle Wetterdaten von DWD Observation und Vorhersage von
-    MOSMIX Small. Jeder Parameter sucht die naechstgelegene Station
-    separat — verschiedene DWD-Datasets decken unterschiedliche Stationen ab.
+    MOSMIX Small. Observation und Forecast laufen parallel.
     """
-    obs = _fetch_observation(latitude, longitude)
-    fc = _fetch_forecast(latitude, longitude)
+    obs, fc = await asyncio.gather(
+        asyncio.to_thread(_fetch_observation, latitude, longitude),
+        asyncio.to_thread(_fetch_forecast, latitude, longitude),
+    )
 
-    # _fetch_observation returns {"_primary": best_station, "_all": [all stations]}
     primary = obs.get("_primary") or _empty_observation()
     all_stations = obs.get("_all", [])
-
-    sun_elevation = None  # Provided by openmeteo adapter
 
     def _precip_bool(key: str) -> bool | None:
         val = fc[key]
@@ -72,12 +80,11 @@ async def fetch_wetterdienst_weather(
         temperature=primary["temperature"],
         feels_like=None,
         uv_index=fc["uv_index"],
-        sun_elevation=sun_elevation,
+        sun_elevation=None,
         sunrise=None,
         sunset=None,
     )
 
-    # Add all DWD stations that contributed data, not just the best one
     for station_data in all_stations:
         weather_data.stations.append(WeatherStation(
             source="dwd",
@@ -96,86 +103,93 @@ async def fetch_wetterdienst_weather(
 
 def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     """
-    Holt die neuesten Messwerte von den 3 nächsten Stationen.
-    Jeder Parameter wird separat abgefragt, weil verschiedene DWD-Datasets
-    unterschiedliche Stationen abdecken. Am Ende wird die Station mit dem
-    frischesten Messzeitpunkt bevorzugt.
+    Holt die neuesten Messwerte von 3 nächsten Stationen.
+    Alle 4 Datasets werden in einem combined Request abgefragt.
+    Die Werte der Stationen werden parallel abgerufen.
     """
-    _PARAMS = [
-        # (obs_spec, result_key)
-        (_OBS_TEMPERATURE, "temperature"),
-        (_OBS_WIND_SPEED, "wind_speed"),
-        (_OBS_WIND_GUST, "wind_gust"),
-        (_OBS_PRECIPITATION, "precipitation"),
-    ]
+    start_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # Per-station cache: station_id → {info, values_by_key}
-    station_cache: dict[str, dict] = {}
-
-    for obs_param, key in _PARAMS:
+    try:
         req = DwdObservationRequest(
-            parameters=[obs_param],
+            parameters=[f"10_minutes/{ds}" for ds, _, _ in _OBS_DATASETS],
             periods="recent",
+            start_date=start_date,
+            end_date=end_date,
             settings=_SETTINGS,
         )
+        station_df = req.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+    except Exception:
+        return _empty_observation()
+
+    if len(station_df) == 0:
+        return _empty_observation()
+
+    # Pick 3 unique stations: prefer those with more datasets, then nearest
+    grouped = station_df.group_by("station_id").agg(
+        pl.col("distance").min().alias("min_distance"),
+        pl.col("dataset").n_unique().alias("num_datasets"),
+    )
+    top = grouped.sort(["num_datasets", "min_distance"], descending=[True, False]).head(3)
+    selected_ids = [row["station_id"] for row in top.iter_rows(named=True)]
+
+    # Build station info map (from the combined station list)
+    station_info: dict[str, dict] = {}
+    for row in station_df.sort("distance").iter_rows(named=True):
+        sid = row["station_id"]
+        if sid not in station_info:
+            station_info[sid] = {
+                "name": row["name"],
+                "lat": row["latitude"],
+                "lon": row["longitude"],
+            }
+
+    def _fetch_station_values(sid: str) -> tuple[str, dict]:
+        """Fetch all values for a station, keyed by parameter name."""
         try:
-            station_df = req.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+            vals = req.filter_by_station_id(station_id=sid).values.all().df
+            if len(vals) == 0:
+                return (sid, {})
+            return (sid, {row["parameter"]: row for row in vals.sort("date", descending=True).iter_rows(named=True)})
         except Exception:
+            return (sid, {})
+
+    results = []
+    with ThreadPoolExecutor(max_workers=len(selected_ids)) as pool:
+        futs = [pool.submit(_fetch_station_values, sid) for sid in selected_ids]
+        results = [f.result() for f in futs]
+    station_values = dict(results)
+
+    # Extract values per station
+    station_cache: dict[str, dict] = {}
+    for sid in selected_ids:
+        vals_dict = station_values.get(sid, {})
+        if not vals_dict:
             continue
 
-        if len(station_df) == 0:
-            continue
+        info = station_info.get(sid, {})
+        cache = {
+            "info": {"name": info.get("name"), "lat": info.get("lat"), "lon": info.get("lon")},
+            "values": {},
+            "latest_time": None,
+        }
 
-        # Look at up to 3 nearest stations
-        for row_idx in range(min(3, len(station_df))):
-            first = station_df.row(row_idx, named=True)
-            station_id = first["station_id"]
+        for _, result_key, param_name in _OBS_DATASETS:
+            if param_name in vals_dict:
+                row = vals_dict[param_name]
+                val = _to_float_value(row)
+                if val is not None:
+                    cache["values"][result_key] = val
+                if cache["latest_time"] is None:
+                    cache["latest_time"] = row.get("date")
 
-            # Lazily load station values
-            if station_id not in station_cache:
-                station_cache[station_id] = {
-                    "info": {
-                        "name": first["name"],
-                        "lat": first["latitude"],
-                        "lon": first["longitude"],
-                    },
-                    "values": {},
-                    "latest_time": None,
-                }
-                try:
-                    values_df = req.filter_by_station_id(station_id=station_id).values.all().df
-                    values_dicts = values_df.to_dicts()
-                    if values_dicts:
-                        values_dicts.sort(key=lambda r: str(r["date"]), reverse=True)
-                        station_cache[station_id]["latest_time"] = values_dicts[0]["date"]
-                except Exception:
-                    pass
+        if cache["info"].get("name"):
+            station_cache[sid] = cache
 
-            values_dicts_cached = station_cache[station_id]["values"].get(key)
-            if values_dicts_cached is None:
-                try:
-                    values_df = req.filter_by_station_id(station_id=station_id).values.all().df
-                    values_dicts = values_df.to_dicts()
-                    values_dicts.sort(key=lambda r: str(r["date"]), reverse=True)
-                    station_cache[station_id]["values"][key] = values_dicts
-                    if station_cache[station_id]["latest_time"] is None and values_dicts:
-                        station_cache[station_id]["latest_time"] = values_dicts[0]["date"]
-                except Exception:
-                    pass
-
-            values_dicts = station_cache[station_id]["values"].get(key) or []
-            if not values_dicts:
-                continue
-
-            val = _to_float_value(values_dicts[0])
-            if val is not None:
-                station_cache[station_id]["values"][key] = values_dicts
-
-    # Find the station with the freshest data
     if not station_cache:
         return _empty_observation()
 
-    # Build a list of all stations with their data
+    # Build station list with extracted values
     all_stations = []
     for sid, sc in station_cache.items():
         station = _empty_observation()
@@ -183,19 +197,12 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         station["lat"] = sc["info"]["lat"]
         station["lon"] = sc["info"]["lon"]
         station["time"] = sc["latest_time"]
-        for obs_param, key in _PARAMS:
-            values_dicts = sc["values"].get(key)
-            if values_dicts:
-                val = _to_float_value(values_dicts[0])
-                if val is not None:
-                    station[key] = val
+        for key in ["temperature", "wind_speed", "wind_gust", "precipitation"]:
+            if key in sc["values"]:
+                station[key] = sc["values"][key]
         all_stations.append(station)
 
-    # Primary values come from the station with the freshest data
-    best_station = max(
-        all_stations,
-        key=lambda s: s.get("time") or "",
-    )
+    best_station = max(all_stations, key=lambda s: s.get("time") or "")
 
     return {"_primary": best_station, "_all": all_stations}
 
@@ -207,7 +214,16 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
     """
     Holt die naechsten 2 Stunden aus DWD MOSMIX Small.
+    Uses polars-native filtering and in-process cache (TTL 10min).
     """
+    cache_key = f"{lat:.2f},{lon:.2f}"
+    now = datetime.now(timezone.utc)
+
+    # Check cache
+    cached = _mosmix_cache.get(cache_key)
+    if cached and now - cached[0] < _MOSMIX_CACHE_TTL:
+        return _process_forecast_df(cached[1], now)
+
     param_precipitation = "precipitation_height_significant_weather_last_1h"
     param_radiation = "radiation_global"
 
@@ -227,21 +243,31 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
     if len(station_df) == 0:
         return _empty_forecast()
 
-    first = station_df.row(0, named=True)
-    station_id = first["station_id"]
+    station_id = station_df.row(0, named=True)["station_id"]
 
     try:
-        values_dicts = request.filter_by_station_id(station_id=station_id).values.all().df.to_dicts()
+        vals_df = request.filter_by_station_id(station_id=station_id).values.all().df
     except Exception:
         return _empty_forecast()
 
-    if not values_dicts:
+    if len(vals_df) == 0:
         return _empty_forecast()
 
-    precip_rows = [r for r in values_dicts if r["parameter"] == param_precipitation]
-    radiation_rows = [r for r in values_dicts if r["parameter"] == param_radiation]
+    # Cache the raw forecast data
+    _mosmix_cache[cache_key] = (now, vals_df)
 
-    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    return _process_forecast_df(vals_df, now)
+
+
+def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]:
+    """Extract precip windows and UV index from MosMix forecast DataFrame."""
+    param_precipitation = "precipitation_height_significant_weather_last_1h"
+    param_radiation = "radiation_global"
+
+    precip = vals_df.filter(vals_df["parameter"] == param_precipitation)
+    rad = vals_df.filter(vals_df["parameter"] == param_radiation)
+
+    now_rounded = now.replace(second=0, microsecond=0)
     forecast: dict[str, Any] = {
         "precip_30m": None,
         "intensity_30m": None,
@@ -252,39 +278,23 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
         "uv_index": None,
     }
 
-    windows = {
-        "30m": (now, now + timedelta(minutes=30)),
-        "1h": (now, now + timedelta(hours=1)),
-        "2h": (now, now + timedelta(hours=2)),
-    }
-
-    for label, (t_start, t_end) in windows.items():
-        precip_values: list[float] = []
-
-        for r in precip_rows:
-            dt = _parse_datetime(r["date"])
-            if dt is None or dt < t_start or dt >= t_end:
-                continue
-            val = _to_float_value(r)
-            if val is not None:
-                precip_values.append(val)
-
-        if precip_values:
-            mean_intensity = sum(precip_values) / len(precip_values)
-            forecast[f"precip_{label}"] = round(mean_intensity, 2)
-            forecast[f"intensity_{label}"] = round(mean_intensity, 2)
+    for label, delta in [("30m", timedelta(minutes=30)), ("1h", timedelta(hours=1)), ("2h", timedelta(hours=2))]:
+        window = precip.filter(
+            (precip["date"] >= now_rounded) & (precip["date"] < now_rounded + delta)
+        )
+        if len(window) > 0:
+            mean = window["value"].mean()
+            if mean is not None and not math.isnan(mean):
+                val = round(mean, 2)
+                forecast[f"precip_{label}"] = val
+                forecast[f"intensity_{label}"] = val
 
     # UV-Index aus Globalstrahlung (J/m^2)
-    radiation_values: list[float] = []
-    for r in radiation_rows:
-        val = _to_float_value(r)
-        if val is not None:
-            radiation_values.append(val)
-
-    if radiation_values and forecast["uv_index"] is None:
-        mean_rad_jm2 = sum(radiation_values) / len(radiation_values)
-        uv_approx = round(mean_rad_jm2 * 0.019, 1)
-        forecast["uv_index"] = min(max(uv_approx, 0), 16)
+    if len(rad) > 0:
+        mean_rad = rad["value"].mean()
+        if mean_rad is not None and not math.isnan(mean_rad):
+            uv_approx = round(mean_rad * 0.019, 1)
+            forecast["uv_index"] = min(max(uv_approx, 0), 16)
 
     return forecast
 
@@ -325,16 +335,3 @@ def _to_float_value(record: dict[str, Any]) -> float | None:
         return None
     f = float(val)
     return None if math.isnan(f) else f
-
-
-def _parse_datetime(dt_val: Any) -> datetime | None:
-    """Verschiedene Datumsformate parsen."""
-    if dt_val is None:
-        return None
-    if isinstance(dt_val, datetime):
-        return dt_val.replace(tzinfo=timezone.utc) if dt_val.tzinfo is None else dt_val.astimezone(timezone.utc)
-    try:
-        parsed = pd.Timestamp(dt_val).to_pydatetime()
-        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
-    except (TypeError, ValueError):
-        return None
