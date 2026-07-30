@@ -7,7 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-import fsspec
 import polars as pl
 
 from wetterdienst.provider.dwd.observation import DwdObservationRequest
@@ -18,6 +17,16 @@ from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 
 logger = logging.getLogger(__name__)
+
+# Disable fsspec HTTP directory listing cache at the class level so every
+# HTTPFileSystem instance created by wetterdienst skips the cache.
+# Stale listings cause "does not have a list of files" errors when the
+# DWD server adds new station ZIPs between cache refreshes.
+try:
+    from fsspec.implementations.http import HTTPFileSystem
+    HTTPFileSystem.use_listings_cache = False
+except Exception:
+    pass
 
 # DWD cache: controlled by DWD_CACHE env var (.env).
 # Defaults to disabled — stale fsspec cache causes
@@ -32,26 +41,9 @@ class _WdSettings(Settings):
 
 _SETTINGS = _WdSettings(cache_disable=not _DWD_CACHE_ENABLED)
 
-# Disable fsspec HTTP directory listing cache globally — stale listings
-# cause "does not have a list of files" errors when the DWD server adds
-# new station ZIPs between cache refreshes.  We always fetch fresh.
-try:
-    _http_fs = fsspec.filesystem("http")
-    _http_fs.use_listings_cache = False
-except Exception:
-    pass
-
 
 def _clear_dwd_cache():
-    """Clear the fsspec HTTP directory listing cache and optional on-disk cache."""
-    # In-memory directory listing cache.
-    try:
-        fs = fsspec.filesystem("http")
-        fs.dircache.clear()
-    except Exception:
-        pass
-
-    # On-disk cache (only when enabled).
+    """Clear the optional on-disk fsspec cache directory."""
     cache_dir = _SETTINGS.cache_dir
     if cache_dir and os.path.isdir(cache_dir):
         try:
