@@ -61,19 +61,27 @@ Three adapters run in parallel per request. A single adapter failure doesn't tak
 
 **Open-Meteo Adapter** (`openmeteo.py`): Calls the Open-Meteo forecast API via plain `httpx` (not the `openmeteo_requests` FFI client). Provides current temperature, apparent temperature, wind, precipitation, UV index (accurate), plus sunrise/sunset with sun elevation. Typical response time: <1s.
 
-**Buienradar Adapter** (`buinradar.py`): Calls `buienradar.buienradar.get_data()`, parses the JSON `content` string and `raincontent` grid. Rain content uses integer codes per 5-minute interval, converted via `to_mmh()`: `10 ** ((code - 109) / 32)`. Station lookup uses Euclidean distance (not haversine).
+**Buienradar Adapter** (`buinradar.py`): Calls `buienradar.buienradar.get_data()`, parses the JSON `content` string and `raincontent` grid. Rain content uses integer codes per 5-minute interval, converted via `to_mmh()`: `10 ** ((code - 109) / 32)`. Station lookup uses Euclidean distance (not haversine). Radar precipitation forecast (30m/1h/2h) works for Germany too — it's grid-based, not station-based. Only temperature/wind/current-precipitation are NL-only (nearest NL station).
 
 ### Response merging (`weather_data.py`)
 
 The router fetches all 3 adapters in parallel, then merges:
-- **Wind + precipitation**: `max()` across all adapters (conservative — over-reporting is safer)
-- **Feels like**: prefers Open-Meteo's `apparent_temperature`, falls back to freshest source
-- **Temperature, UV, sun data**: freshest source (newest timestamp first)
-- **Stations**: collected from all adapters that returned data
 
-### MosMix caching
+| Fields | Strategy | Why |
+|---|---|---|
+| Wind speed/gust | `max()` across all adapters | Over-reporting is safer |
+| Precipitation rate + 30m/1h/2h | `max()` across all adapters | Missing rain is worse than over-reporting |
+| Feels like | Open-Meteo first, then freshest | Open-Meteo's apparent_temperature is most reliable |
+| Temperature | Freshest source (newest timestamp first) | Most recent data is most accurate |
+| UV index | Freshest source | Open-Meteo provides accurate real-time UV; DWD's is rough |
+| Sunrise/sunset/sun elevation | Freshest source | Only Open-Meteo provides these |
+| Stations | All stations from all adapters | Shows which sources contributed |
 
-MosMix forecast data is cached in-memory with a 10-minute TTL (`_mosmix_cache`). Forecasts update every 1-3 hours; a fresh MosMix fetch takes ~11s. Cache key is `{lat:.2f},{lon:.2f}`.
+### DWD caching
+
+Two layers:
+1. **In-memory MosMix cache** (`_mosmix_cache`) — 10-minute TTL, cache key `{lat:.2f},{lon:.2f}`. MosMix updates every 1-3 hours; a fresh fetch takes ~11s.
+2. **fsspec disk cache** (wetterdienst default) — controlled by `DWD_CACHE` env var in `.env`. When enabled, speeds up repeated requests from ~7s to ~0.3s. If the cache returns empty results, it is automatically cleared and retried once. Default: disabled (stale cache can cause "does not have a list of files" errors).
 
 ## Windows SSL Configuration
 
