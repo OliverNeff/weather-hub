@@ -1,35 +1,19 @@
+import httpx
+from datetime import datetime, timezone, timedelta
 import math
-from datetime import datetime, timedelta, timezone
-
-import niquests
-import openmeteo_requests
 
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 
 # ---------------------------------------------------------------------------
-# Open-Meteo variable IDs
+# km/h -> m/s
 # ---------------------------------------------------------------------------
-# Current
-_VAR_TEMPERATURE = 47
-_VAR_APPARENT_TEMPERATURE = 1
-_VAR_WIND_SPEED = 59      # km/h
-_VAR_WIND_GUSTS = 58      # km/h
-_VAR_PRECIPITATION = 24
-_VAR_UV_INDEX = 52
-
-# Daily (int64)
-_VAR_SUNRISE = 40
-_VAR_SUNSET = 41
-
-# km/h → m/s
 _KMH_TO_MS = 1 / 3.6
 
 # ---------------------------------------------------------------------------
-# Shared session + client — reused across all requests for connection pooling.
+# Shared async session - reused across requests for connection pooling.
 # ---------------------------------------------------------------------------
-_session = niquests.AsyncSession()
-_client = openmeteo_requests.AsyncClient(session=_session)
+_session = httpx.AsyncClient(timeout=10)
 
 
 async def fetch_openmeteo_weather(
@@ -39,44 +23,40 @@ async def fetch_openmeteo_weather(
     Holt aktuelle Wetterdaten + Vorhersage + sunrise/sunset von Open-Meteo.
     """
     try:
-        responses = await _client.weather_api(
-            url="https://api.open-meteo.com/v1/forecast",
+        r = await _session.get(
+            "https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": latitude,
                 "longitude": longitude,
-                "current": (
-                    "temperature_2m,apparent_temperature,"
-                    "wind_speed_10m,wind_gusts_10m,precipitation,uv_index"
-                ),
+                "current": "temperature_2m,apparent_temperature,wind_speed_10m,wind_gusts_10m,precipitation,uv_index",
                 "hourly": "precipitation,uv_index",
                 "daily": "sunrise,sunset",
                 "timezone": "UTC",
                 "forecast_days": 1,
             },
         )
+        r.raise_for_status()
+        data = r.json()
     except Exception:
         return _empty(latitude, longitude)
 
-    try:
-        resp = responses[0]
-    except IndexError:
-        return _empty(latitude, longitude)
+    current = data.get("current", {})
+    hourly = data.get("hourly", {})
+    daily = data.get("daily", {})
 
-    current = resp.Current()
-    sunrise_dt, sunset_dt, sun_elevation = _parse_sun(current, resp.Daily(), latitude, longitude)
+    sunrise_dt, sunset_dt, sun_elevation = _parse_sun(daily, latitude, longitude)
 
-    # Build forecast windows from hourly precipitation
     now = datetime.now(timezone.utc)
-    forecast = _parse_hourly_precipitation(resp.Hourly(), now)
-    weather_time = datetime.fromtimestamp(current.Time(), tz=timezone.utc)
+    forecast = _parse_hourly_precipitation(hourly, now)
+    weather_time = _parse_iso(current.get("time"))
 
     weather_data = WeatherData(
-        temperature=_safe(current, _VAR_TEMPERATURE),
-        feels_like=_safe(current, _VAR_APPARENT_TEMPERATURE),
-        wind_speed=_kmh(_safe(current, _VAR_WIND_SPEED)),
-        wind_gust=_kmh(_safe(current, _VAR_WIND_GUSTS)),
-        precipitation_rate=_safe(current, _VAR_PRECIPITATION),
-        uv_index=_safe(current, _VAR_UV_INDEX),
+        temperature=_sf(current, "temperature_2m"),
+        feels_like=_sf(current, "apparent_temperature"),
+        wind_speed=_kmh(_sf(current, "wind_speed_10m")),
+        wind_gust=_kmh(_sf(current, "wind_gusts_10m")),
+        precipitation_rate=_sf(current, "precipitation"),
+        uv_index=_sf(current, "uv_index"),
         sun_elevation=sun_elevation,
         sunrise=sunrise_dt,
         sunset=sunset_dt,
@@ -89,7 +69,7 @@ async def fetch_openmeteo_weather(
             name="computed",
             lat=latitude,
             lon=longitude,
-            time=weather_time,
+            time=weather_time or datetime.now(timezone.utc),
         )
     )
 
@@ -97,7 +77,6 @@ async def fetch_openmeteo_weather(
 
 
 def _empty(lat: float, lon: float) -> WeatherData:
-    """Return an empty WeatherData when the API call failed entirely."""
     data = WeatherData()
     data.stations.append(
         WeatherStation(source="openmeteo", name="computed", lat=lat, lon=lon, time=datetime.now(timezone.utc))
@@ -106,62 +85,49 @@ def _empty(lat: float, lon: float) -> WeatherData:
 
 
 # ---------------------------------------------------------------------------
-# Helpers — Current variables
+# Helpers
 # ---------------------------------------------------------------------------
 
-def _safe(current, var_id: int) -> float | None:
-    """Extract a single float value from a Current VariablesWithTime by var_id."""
-    for i in range(current.VariablesLength()):
-        v = current.Variables(i)
-        if v.Variable() == var_id and not v.ValuesIsNone():
-            val = v.Value()
-            return None if (val != val) else round(val, 1)  # NaN guard
-    return None
+def _sf(d: dict, key: str):
+    """Extract a single float value, None if missing or NaN."""
+    val = d.get(key)
+    if val is None:
+        return None
+    f = float(val)
+    return None if math.isnan(f) else round(f, 1)
 
 
-def _kmh(kmh: float | None) -> float | None:
+def _kmh(kmh):
     """Convert km/h to m/s."""
     if kmh is None:
         return None
-    return round(kmh * _KMh_TO_MS, 1)
+    return round(kmh * _KMH_TO_MS, 1)
 
 
-# ---------------------------------------------------------------------------
-# Helpers — Sunrise / Sunset + elevation
-# ---------------------------------------------------------------------------
+def _parse_iso(s: str | None):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
 
-def _parse_sun(
-    current, daily, lat: float, lon: float
-) -> tuple[datetime | None, datetime | None, float | None]:
-    sunrise_ts = None
-    sunset_ts = None
 
-    for i in range(daily.VariablesLength()):
-        var = daily.Variables(i)
-        var_id = var.Variable()
-        length = var.ValuesInt64Length()
-        if var_id == _VAR_SUNRISE and length > 0:
-            sunrise_ts = var.ValuesInt64(0)
-        elif var_id == _VAR_SUNSET and length > 0:
-            sunset_ts = var.ValuesInt64(0)
+def _parse_sun(daily: dict, lat: float, lon: float):
+    sunrise_dt = None
+    sunset_dt = None
 
-    sunrise_dt = (
-        datetime.fromtimestamp(sunrise_ts, tz=timezone.utc)
-        if sunrise_ts is not None
-        else None
-    )
-    sunset_dt = (
-        datetime.fromtimestamp(sunset_ts, tz=timezone.utc)
-        if sunset_ts is not None
-        else None
-    )
+    for ts in daily.get("sunrise", []):
+        sunrise_dt = _parse_iso(ts)
+        break
+    for ts in daily.get("sunset", []):
+        sunset_dt = _parse_iso(ts)
+        break
 
     if sunrise_dt is None or sunset_dt is None:
         return sunrise_dt, sunset_dt, None
 
-    current_ts = current.Time()
-    now = datetime.fromtimestamp(current_ts, tz=timezone.utc)
-
+    now = datetime.now(timezone.utc)
     if now < sunrise_dt or now > sunset_dt:
         return sunrise_dt, sunset_dt, None
 
@@ -185,19 +151,8 @@ def _noaa_elevation(lat: float, lon: float, now: datetime) -> float | None:
     return round(elevation, 1)
 
 
-# ---------------------------------------------------------------------------
-# Helpers — Hourly precipitation forecast windows
-# ---------------------------------------------------------------------------
-
-def _parse_hourly_precipitation(
-    hourly, now: datetime
-) -> dict:
-    """
-    Build 30m / 1h / 2h forecast fields from hourly precipitation data.
-
-    Open-Meteo returns hourly totals (mm per hour). We average the values
-    that fall within each window for amount and intensity.
-    """
+def _parse_hourly_precipitation(hourly: dict, now: datetime):
+    """Build 30m / 1h / 2h forecast fields from hourly precipitation data."""
     result = {
         "precipitation_next_30m": None,
         "precipitation_amount_next_30m": None,
@@ -210,21 +165,9 @@ def _parse_hourly_precipitation(
         "precipitation_intensity_next_2h": None,
     }
 
-    # Find precipitation variable in hourly
-    precip_var = None
-    for i in range(hourly.VariablesLength()):
-        v = hourly.Variables(i)
-        if v.Variable() == _VAR_PRECIPITATION:
-            precip_var = v
-            break
-
-    if precip_var is None:
-        return result
-
-    # Get all hourly timestamps and values
-    start_ts = hourly.Time()
-    n = precip_var.ValuesLength()
-    if n == 0:
+    times = hourly.get("time", [])
+    precip = hourly.get("precipitation", [])
+    if not times or not precip:
         return result
 
     windows = {
@@ -233,18 +176,15 @@ def _parse_hourly_precipitation(
         "2h": timedelta(hours=2),
     }
 
-    now_utc = datetime.now(timezone.utc)
-
     for label, duration in windows.items():
-        window_end = now_utc + duration
-        values: list[float] = []
-
-        for j in range(n):
-            # Each hour is spaced by 3600s from start
-            ts = start_ts + (j * 3600)
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            if dt >= now_utc and dt < window_end:
-                val = precip_var.Values(j)
+        window_end = now + duration
+        values = []
+        for i, ts in enumerate(times):
+            dt = _parse_iso(ts)
+            if dt is None:
+                continue
+            if dt >= now and dt < window_end:
+                val = precip[i]
                 if val is not None and val > 0:
                     values.append(val)
 
