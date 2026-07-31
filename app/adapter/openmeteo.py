@@ -125,13 +125,7 @@ def _parse_sun(daily: dict, lat: float, lon: float):
         sunset_dt = _parse_iso(ts)
         break
 
-    if sunrise_dt is None or sunset_dt is None:
-        return sunrise_dt, sunset_dt, None
-
     now = datetime.now(timezone.utc)
-    if now < sunrise_dt or now > sunset_dt:
-        return sunrise_dt, sunset_dt, None
-
     elevation = _noaa_elevation(lat, lon, now)
     return sunrise_dt, sunset_dt, elevation
 

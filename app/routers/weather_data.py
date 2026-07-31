@@ -8,7 +8,7 @@ from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
 from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # noqa
 from app.models.weather_data import WeatherData
 
 router = APIRouter(
@@ -56,13 +56,13 @@ _CONSERVATIVE_FIELDS = {
 }
 
 
-def _pick_first(data: tuple, field: str):
-    """Return the first non-None value for *field* across adapters."""
+def _pick_first(data: tuple, field: str) -> tuple:
+    """Return the first non-None value for *field* and its adapter."""
     for wd in data:
         val = getattr(wd, field)
         if val is not None:
-            return val
-    return None
+            return val, wd
+    return None, None
 
 
 def _pick_max(data: tuple, field: str):
@@ -117,23 +117,29 @@ async def get_weather_data(
     fresh = _sorted_by_freshness((dwd, buienradar, openmeteo))
     all_data = (dwd, buienradar, openmeteo)
 
+    # Resolve temperature first — feels_like must come from the same adapter.
+    temp_val, temp_adapter = _pick_first(fresh, "temperature")
+    setattr(merged, "temperature", temp_val)
+
     for field in _MERGEABLE_FIELDS:
-        if field == "time":
+        if field in ("time", "temperature", "feels_like"):
             continue
         if field in _CONSERVATIVE_FIELDS:
             # Wind + precipitation: highest value across all adapters.
             val = _pick_max(all_data, field)
-        elif field == "feels_like":
-            # Prefer openmeteo (apparent_temperature), fallback to any.
-            om = _pick_first(
-                [a for a in fresh if a.stations and a.stations[0].source == "openmeteo"],
-                field,
-            )
-            val = om if om is not None else _pick_first(fresh, field)
         else:
-            # uv_index, temperature, sun data: freshest source.
-            val = _pick_first(fresh, field)
+            # uv_index, sun data: freshest source.
+            val, _ = _pick_first(fresh, field)
         setattr(merged, field, val)
+
+    # feels_like: prefer the adapter that supplied temperature, fallback to freshest.
+    if temp_adapter is not None:
+        fl = getattr(temp_adapter, "feels_like", None)
+    else:
+        fl = None
+    if fl is None:
+        fl, _ = _pick_first(fresh, "feels_like")
+    setattr(merged, "feels_like", fl)
 
     # Compute precipitation_now: True if max measured intensity across adapters > 0.
     # DWD adapter already filters out stale observation data (>2h old).
