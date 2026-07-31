@@ -385,17 +385,73 @@ def _get_all_stations() -> list[dict[str, Any]]:
     return list(seen.values())
 
 
+def _fetch_param_from_stations(
+    param_key: str,
+    stations: list[dict[str, Any]],
+) -> list[tuple[str, float | None, datetime | None, dict | None]]:
+    """
+    Fetch a single parameter from the given stations.
+    Returns a list of (param_key, value, timestamp, station_info) tuples.
+    """
+    ds = _DATASETS[param_key]
+    results: list[tuple[str, float | None, datetime | None, dict | None]] = []
+    try:
+        # Only try stations that have data for this parameter
+        available = _get_stations_for_param(param_key)
+        available_ids = {s["id"] for s in available}
+
+        stations_to_try = [s for s in stations if s["id"] in available_ids]
+        if not stations_to_try:
+            return results
+
+        def _try_one(st):
+            try:
+                val, dt = _fetch_station_value(
+                    st["id"],
+                    ds["zip_prefix"],
+                    ds["csv_column"],
+                    ds["dir"],
+                )
+                return (param_key, val, dt, {
+                    "id": st["id"],
+                    "station_name": st["name"],
+                    "lat": st["lat"],
+                    "lon": st["lon"],
+                    "distance": st["distance"],
+                })
+            except Exception:
+                return (param_key, None, None, None)
+
+        with ThreadPoolExecutor(max_workers=len(stations_to_try)) as pool:
+            futs = [pool.submit(_try_one, st) for st in stations_to_try]
+            results = [f.result() for f in futs]
+
+        for pk, val, dt, si in results:
+            if val is not None and si is not None:
+                logger.info(
+                    "dwd: %s = %s from station %s (%s, %.1fkm) at %s",
+                    pk, val, si["id"], si["station_name"], si["distance"], dt,
+                )
+    except httpx.HTTPError as e:
+        logger.warning("dwd: HTTP error fetching %s: %s", param_key, e)
+    except Exception as e:
+        logger.error("dwd: failed to fetch %s: %s", param_key, e, exc_info=True)
+    return results
+
+
 def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     """
-    Fetch the latest measurement for each parameter from the N nearest
-    stations (total, not per-parameter). All parameters are fetched in parallel.
+    Fetch the latest measurement for each parameter from stations,
+    ensuring at least _NUM_STATIONS have data.
+
+    If some of the nearest stations report no data, the next nearest
+    candidates are fetched until enough stations with data are found.
+    Partial data from earlier stations is still used — having something
+    is better than nothing.
     """
     logger.info("dwd: fetching observation for lat=%.2f, lon=%.2f", lat, lon)
 
     param_keys = ["temperature", "wind_speed", "wind_gust", "precipitation"]
-
-    # Find stations — request more candidates than we need (so we can
-    # pick the N that actually have data for all datasets).
     try:
         all_stations = _get_all_stations()
         candidates = _find_nearest_stations(all_stations, lat, lon, count=_NUM_STATIONS * 2)
@@ -409,109 +465,95 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 
     # Sort by distance asc, then by coverage desc (more data sources first).
     candidates.sort(key=lambda s: (s["distance"], -s.get("coverage", 0)))
-    targets = candidates[:_NUM_STATIONS]
 
-    def _fetch_one(param_key: str) -> list[tuple[str, float | None, datetime | None, dict | None]]:
-        """
-        Fetch a single parameter from the selected stations.
-        Returns a list of (param_key, value, timestamp, station_info) tuples,
-        sorted by station distance (nearest first).
-        """
-        ds = _DATASETS[param_key]
-        results: list[tuple[str, float | None, datetime | None, dict | None]] = []
-        try:
-            # Only try stations that have data for this parameter
-            available = _get_stations_for_param(param_key)
-            available_ids = {s["id"] for s in available}
+    # Split into rounds: _NUM_STATIONS per round. Fetch successive rounds
+    # until we have enough stations with data or run out of candidates.
+    rounds = [
+        candidates[i:i + _NUM_STATIONS]
+        for i in range(0, len(candidates), _NUM_STATIONS)
+    ]
 
-            stations_to_try = [s for s in targets if s["id"] in available_ids]
-            if not stations_to_try:
-                logger.warning("dwd: no selected station has data for %s", param_key)
-                return results
-
-            def _try_station(st):
-                try:
-                    val, dt = _fetch_station_value(
-                        st["id"],
-                        ds["zip_prefix"],
-                        ds["csv_column"],
-                        ds["dir"],
-                    )
-                    return (param_key, val, dt, {
-                        "id": st["id"],
-                        "station_name": st["name"],
-                        "lat": st["lat"],
-                        "lon": st["lon"],
-                        "distance": st["distance"],
-                    })
-                except Exception:
-                    return (param_key, None, None, None)
-
-            with ThreadPoolExecutor(max_workers=len(stations_to_try)) as pool:
-                futs = [pool.submit(_try_station, st) for st in stations_to_try]
-                results = [f.result() for f in futs]
-
-            for pk, val, dt, si in results:
-                if val is not None and si is not None:
-                    logger.info(
-                        "dwd: %s = %s from station %s (%s, %.1fkm) at %s",
-                        param_key, val, si["id"], si["station_name"], si["distance"], dt,
-                    )
-        except httpx.HTTPError as e:
-            logger.warning("dwd: HTTP error fetching %s: %s", param_key, e)
-        except Exception as e:
-            logger.error("dwd: failed to fetch %s: %s", param_key, e, exc_info=True)
-        return results
-
-    # Fetch all 4 parameters in parallel
-    all_results = []
-    with ThreadPoolExecutor(max_workers=len(param_keys)) as pool:
-        futs = [pool.submit(_fetch_one, pk) for pk in param_keys]
-        for f in futs:
-            all_results.extend(f.result())
-
-    # Build primary values dict — for each param pick the freshest value.
-    # All target stations appear in the result, even if they had no usable data.
-    primary = _empty_observation()
+    all_results: list[tuple[str, float | None, datetime | None, dict | None]] = []
+    stations_seen: dict[str, dict] = {}
     stale_threshold = datetime.now(timezone.utc) - timedelta(hours=2)
 
-    # Initialize station entries for all targets so they always appear.
-    stations_seen: dict[str, dict] = {}
-    for st in targets:
-        stations_seen[st["id"]] = {
-            "station_name": st["name"],
-            "lat": st["lat"],
-            "lon": st["lon"],
-            "distance": st["distance"],
-            "time": None,
-            "temperature": None,
-            "wind_speed": None,
-            "wind_gust": None,
-            "precipitation": None,
-        }
+    round_idx = 0
+    while round_idx < len(rounds):
+        round_batch = rounds[round_idx]
+        round_to_try = [s for s in round_batch if s["id"] not in stations_seen]
 
+        if round_to_try:
+            debug_list = [f"{s['id']} ({s['name']})" for s in round_to_try]
+            logger.debug("dwd: fetching observation for round stations: %s", debug_list)
+
+            # Fetch all 4 parameters for this round's stations
+            round_results = []
+            with ThreadPoolExecutor(max_workers=len(param_keys)) as pool:
+                futs = [
+                    pool.submit(_fetch_param_from_stations, pk, round_to_try)
+                    for pk in param_keys
+                ]
+                for f in futs:
+                    round_results.extend(f.result())
+
+            all_results.extend(round_results)
+        else:
+            round_results = []
+
+        # Initialize station entries for any new stations in this round
+        for st in round_batch:
+            if st["id"] not in stations_seen:
+                stations_seen[st["id"]] = {
+                    "station_name": st["name"],
+                    "lat": st["lat"],
+                    "lon": st["lon"],
+                    "distance": st["distance"],
+                    "time": None,
+                    "temperature": None,
+                    "wind_speed": None,
+                    "wind_gust": None,
+                    "precipitation": None,
+                }
+
+        # Process results for this round
+        for pk, val, dt, station_info in round_results:
+            if val is None:
+                continue
+            if pk == "precipitation" and dt and dt < stale_threshold:
+                logger.warning(
+                    "dwd: discarding stale precip for %s (timestamp %s)",
+                    station_info.get("station_name", "?") if station_info else "?", dt,
+                )
+                continue
+            sid = station_info["id"] if station_info else None
+            if sid and sid in stations_seen:
+                stations_seen[sid]["time"] = dt
+                stations_seen[sid][pk] = val
+
+        # Check: do we have enough stations with data? If not, load next round.
+        round_idx += 1
+        stations_with_data = sum(
+            1 for v in stations_seen.values() if v["time"] is not None
+        )
+        if stations_with_data >= _NUM_STATIONS:
+            break
+        if round_idx < len(rounds):
+            logger.info(
+                "dwd: %d/%d stations with data, fetching next round",
+                stations_with_data, _NUM_STATIONS,
+            )
+
+    # Build primary values from all results — pick freshest per parameter.
+    primary = _empty_observation()
     for pk, val, dt, station_info in all_results:
         if val is None:
             continue
-        # Per-value staleness check: discard stale precipitation.
         if pk == "precipitation" and dt and dt < stale_threshold:
-            logger.warning(
-                "dwd: discarding stale precip for %s (timestamp %s)",
-                station_info.get("station_name", "?") if station_info else "?", dt,
-            )
             continue
-        # Only take value if it's fresher than current primary.
         if primary.get(pk) is None or dt is None or dt > primary.get("time", dt):
             primary[pk] = val
         if dt and (primary.get("time") is None or dt > primary.get("time")):
             primary["time"] = dt
-
-        if station_info:
-            sid = station_info["id"]
-            # Only add stations that are in the selected targets.
-            if sid in stations_seen:
-                stations_seen[sid]["time"] = dt
-                stations_seen[sid][pk] = val
 
     # Log which stations contributed data
     if stations_seen:
