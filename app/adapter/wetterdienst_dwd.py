@@ -197,19 +197,21 @@ def _get_stations_for_param(param_key: str) -> list[dict[str, Any]]:
         station_ids = _parse_directory_listing(html, ds["zip_pattern"])
 
         # Build a lookup from precipitation TSV (most stations)
-        if not hasattr(_get_stations_for_param, "_precip_lookup"):
+        if "precipitation" not in _station_cache:
             try:
                 precip_text = _http_get_text(
                     f"{DWD_BASE}/precipitation/recent/zehn_min_rr_Beschreibung_Stationen.txt"
                 )
                 precip_stations = _parse_station_tsv(precip_text)
-                _get_stations_for_param._precip_lookup = {
-                    s["id"]: s for s in precip_stations
-                }
             except Exception:
-                _get_stations_for_param._precip_lookup = {}
+                precip_stations = []
 
-        lookup = _get_stations_for_param._precip_lookup
+            _station_cache["precipitation_lookup"] = {
+                s["id"]: s for s in precip_stations
+            }
+            _station_cache_time["precipitation_lookup"] = now
+
+        lookup = _station_cache.get("precipitation_lookup", {})
         stations = []
         for sid in station_ids:
             if sid in lookup:
@@ -447,7 +449,7 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         if pk == "precipitation" and dt and dt < stale_threshold:
             logger.warning(
                 "dwd: discarding stale precip for %s (timestamp %s)",
-                station_info["name"] if station_info else "?", dt,
+                station_info.get("station_name", "?") if station_info else "?", dt,
             )
             continue
         # Only take value if it's fresher than current primary.
@@ -458,20 +460,10 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 
         if station_info:
             sid = station_info["id"]
-            if sid not in stations_seen:
-                stations_seen[sid] = {
-                    "station_name": station_info["station_name"],
-                    "lat": station_info["lat"],
-                    "lon": station_info["lon"],
-                    "distance": station_info["distance"],
-                    "time": None,
-                    "temperature": None,
-                    "wind_speed": None,
-                    "wind_gust": None,
-                    "precipitation": None,
-                }
-            stations_seen[sid]["time"] = dt
-            stations_seen[sid][pk] = val
+            # Only add stations that are in the selected targets.
+            if sid in stations_seen:
+                stations_seen[sid]["time"] = dt
+                stations_seen[sid][pk] = val
 
     # Log which stations contributed data
     if stations_seen:
