@@ -65,7 +65,23 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(python3 -m json.tool)",
-      "Bash(tee /tmp/uvicorn.log)"
+      "Bash(tee /tmp/uvicorn.log)",
+      "Bash(pkill -f \"uvicorn app.main\")",
+      "Bash(DEBUG=\"adapter.wetterdienst_dwd\" uv run uvicorn app.main:app --reload)",
+      "Bash(curl -s \"http://127.0.0.1:8000/weather/data?lat=53&lon=8\")",
+      "Bash(uv run *)",
+      "Bash(pkill -f \"watchfiles\")",
+      "Bash(pkill -f \"watchdog\")",
+      "Bash(pkill -f \"python\")",
+      "Bash(pkill -f \"WatchFiles\")",
+      "Bash(netstat -ano)",
+      "Bash(tasklist /FI \"IMAGENAME eq python.exe\")",
+      "Bash(wmic process *)",
+      "Bash(Get-Process python *)",
+      "Bash(Format-Table Id, StartTime, CommandLine -AutoSize)",
+      "Bash(ps -eo pid,command)",
+      "Bash(pkill -f \"uvicorn.*8001\")",
+      "Bash(git commit *)"
     ]
   }
 }
