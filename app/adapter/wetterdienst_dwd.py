@@ -89,6 +89,14 @@ _mosmix_cache: dict[str, tuple[datetime, pl.DataFrame]] = {}
 _MOSMIX_CACHE_TTL = timedelta(minutes=10)
 
 # ---------------------------------------------------------------------------
+# In-process cache for DWD observation ZIP data (TTL 8min)
+# DWD updates every 10 minutes; caching avoids re-downloading ~700KB ZIPs
+# when we only need ~30 lines of CSV.
+# ---------------------------------------------------------------------------
+_zip_cache: dict[str, tuple[datetime, bytes]] = {}
+_ZIP_CACHE_TTL = timedelta(minutes=8)
+
+# ---------------------------------------------------------------------------
 # Lightweight in-memory cache for station lists (TTL 5min)
 # Avoids re-fetching directory listings / TSVs on every request.
 # ---------------------------------------------------------------------------
@@ -197,7 +205,10 @@ def _get_stations_for_param(param_key: str) -> list[dict[str, Any]]:
         station_ids = _parse_directory_listing(html, ds["zip_pattern"])
 
         # Build a lookup from precipitation TSV (most stations)
-        if "precipitation" not in _station_cache:
+        cache_key = "precipitation_lookup"
+        cached = _station_cache.get(cache_key)
+        cached_time = _station_cache_time.get(cache_key)
+        if cached is None or (cached_time and now - cached_time >= _STATION_CACHE_TTL):
             try:
                 precip_text = _http_get_text(
                     f"{DWD_BASE}/precipitation/recent/zehn_min_rr_Beschreibung_Stationen.txt"
@@ -206,12 +217,12 @@ def _get_stations_for_param(param_key: str) -> list[dict[str, Any]]:
             except Exception:
                 precip_stations = []
 
-            _station_cache["precipitation_lookup"] = {
+            _station_cache[cache_key] = {
                 s["id"]: s for s in precip_stations
             }
-            _station_cache_time["precipitation_lookup"] = now
+            _station_cache_time[cache_key] = now
 
-        lookup = _station_cache.get("precipitation_lookup", {})
+        lookup = _station_cache.get(cache_key, {})
         stations = []
         for sid in station_ids:
             if sid in lookup:
@@ -306,14 +317,51 @@ def _fetch_station_value(
     csv_column: str,
     dataset_dir: str,
 ) -> tuple[float | None, datetime | None]:
-    """Download ZIP for a station, extract CSV, return (value, timestamp)."""
-    url = f"{DWD_BASE}/{dataset_dir}/recent/10minutenwerte_{zip_prefix}_{station_id}_akt.zip"
-    zip_data = _http_get_bytes(url)
-
-    with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
-        raw_csv = zf.read(zf.namelist()[0])
+    """Get decompressed CSV from ZIP (cached), extract last value."""
+    raw_csv = _get_csv_from_zip(station_id, zip_prefix, dataset_dir)
 
     return _parse_csv_tail(raw_csv, csv_column)
+
+
+def _get_csv_from_zip(
+    station_id: str,
+    zip_prefix: str,
+    dataset_dir: str,
+) -> bytes:
+    """Get decompressed CSV from a DWD observation ZIP, using in-memory cache.
+
+    DWD updates data every 10 minutes.  A full ZIP is ~500–800 KB while we
+    only need ~30 lines of CSV.  Caching the raw ZIP for 8 minutes avoids
+    re-downloading on subsequent requests.
+    """
+    cache_key = f"{station_id}:{zip_prefix}"
+    now = datetime.now(timezone.utc)
+
+    # Purge stale entries
+    _purge_zip_cache()
+
+    cached = _zip_cache.get(cache_key)
+    if cached and now - cached[0] < _ZIP_CACHE_TTL:
+        zip_raw = cached[1]
+        logger.debug("dwd: ZIP cache hit %s", cache_key)
+    else:
+        url = f"{DWD_BASE}/{dataset_dir}/recent/10minutenwerte_{zip_prefix}_{station_id}_akt.zip"
+        zip_raw = _http_get_bytes(url)
+        _zip_cache[cache_key] = (now, zip_raw)
+        logger.debug("dwd: ZIP cache miss %s (%d bytes)", cache_key, len(zip_raw))
+
+    with zipfile.ZipFile(io.BytesIO(zip_raw)) as zf:
+        return zf.read(zf.namelist()[0])
+
+
+def _purge_zip_cache() -> None:
+    """Remove ZIP cache entries older than 15 minutes."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+    stale = [k for k, (ts, _) in _zip_cache.items() if ts < cutoff]
+    if stale:
+        for k in stale:
+            del _zip_cache[k]
+        logger.debug("dwd: purged %d stale ZIP entries", len(stale))
 
 
 # ---------------------------------------------------------------------------
