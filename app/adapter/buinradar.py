@@ -1,4 +1,5 @@
 import json
+import math
 
 from datetime import datetime, timezone
 from buienradar.buienradar import get_data
@@ -7,6 +8,11 @@ from app.models.weather_data import WeatherData
 
 
 from app.models.weather_station import WeatherStation
+
+# Max distance (degrees) for using Buienradar station data.
+# Buienradar only has NL stations; for DE coords the nearest can be 200km+.
+# Beyond this threshold the temperature/feels_like are irrelevant.
+_MAX_STATION_DEG = 0.9  # ~100km
 
 async def fetch_buienradar_weather(
         latitude: float,
@@ -72,6 +78,16 @@ async def fetch_buienradar_weather(
         precipitation_intensity_next_2h = max(data_2h)
 
     precip_mm = station.get("precipitation")
+
+    # Buienradar has NL-only stations. For DE coords the nearest station can be
+    # 200km+ away — its temperature/feels_like are irrelevant. Only rain radar
+    # is useful across the border.
+    station_dist_deg = math.sqrt(
+        (station.get("lat", 0) - latitude) ** 2
+        + (station.get("lon", 0) - longitude) ** 2
+    )
+    station_too_far = station_dist_deg > _MAX_STATION_DEG
+
     weather_data = WeatherData(
         time=datetime.now(timezone.utc),
         # Wind (Buienradar gibt m/s an → unverändert übernehmen)
@@ -93,9 +109,9 @@ async def fetch_buienradar_weather(
         precipitation_next_2h=precipitation_next_2h,
         precipitation_amount_next_2h=precipitation_amount_next_2h,
         precipitation_intensity_next_2h=precipitation_intensity_next_2h,
-        # Temperatur
-        temperature=station.get("temperature", None),
-        feels_like=station.get("feeltemperature", None),
+        # Temperatur — only use if station is close enough
+        temperature=None if station_too_far else station.get("temperature", None),
+        feels_like=None if station_too_far else station.get("feeltemperature", None),
         # UV → Buienradar liefert das nicht
         uv_index = None,
         # Sonnenstand → Buienradar liefert das nicht
