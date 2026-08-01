@@ -15,4 +15,42 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.9.0",
+    "mypy>=1.15",
+    "freezegun>=1.5",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "B007",    # loop control variable not used (station_info in DWD loop)
+    "E402",    # module level import not at top of file (load_dotenv pattern)
+    "N806",    # variable should be lowercase (R in haversine)
+    "RUF002",  # ambiguous characters in docstrings (German text)
+    "RUF003",  # ambiguous characters in comments (German text)
+    "SIM102",  # nested if statements (preference for readability)
+    "UP017",   # timezone.utc vs datetime.UTC
+    "E501",    # line too long (formatter handles this)
+]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

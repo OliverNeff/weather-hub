@@ -1,14 +1,13 @@
-import math
+import re
+from datetime import datetime, timedelta, timezone
 
 import polars as pl
-import pytest
-
-from datetime import datetime, timezone, timedelta
 
 from app.adapter.wetterdienst_dwd import (
-    _haversine_km,
     _find_nearest_stations,
+    _haversine_km,
     _parse_csv_tail,
+    _parse_directory_listing,
     _parse_station_tsv,
     _process_forecast_df,
 )
@@ -39,12 +38,14 @@ class TestFindNearestStations:
     def _make_stations(self, offsets):
         stations = []
         for i, (dlat, dlon) in enumerate(offsets):
-            stations.append({
-                "id": f"{1000 + i:05d}",
-                "lat": 50.0 + dlat,
-                "lon": 9.0 + dlon,
-                "name": f"Station {i}",
-            })
+            stations.append(
+                {
+                    "id": f"{1000 + i:05d}",
+                    "lat": 50.0 + dlat,
+                    "lon": 9.0 + dlon,
+                    "name": f"Station {i}",
+                }
+            )
         return stations
 
     def test_picks_closest(self):
@@ -87,31 +88,37 @@ class TestFindNearestStations:
 class TestParseCsvTail:
     def _make_csv(self, rows):
         header = "MESS_DATUM;TT_10;Qualitaet"
-        lines = [header] + rows
+        lines = [header, *rows]
         return ("\n".join(lines)).encode("latin-1")
 
     def test_valid_data(self):
-        csv_bytes = self._make_csv([
-            "202608011200;22.5;0",
-            "202608011210;23.0;0",
-        ])
+        csv_bytes = self._make_csv(
+            [
+                "202608011200;22.5;0",
+                "202608011210;23.0;0",
+            ]
+        )
         val, dt = _parse_csv_tail(csv_bytes, "TT_10")
         assert val == 23.0
         assert dt == datetime(2026, 8, 1, 12, 10, tzinfo=timezone.utc)
 
     def test_nan_value_skipped(self):
-        csv_bytes = self._make_csv([
-            "202608011200;-999;0",
-            "202608011210;23.0;0",
-        ])
-        val, dt = _parse_csv_tail(csv_bytes, "TT_10")
+        csv_bytes = self._make_csv(
+            [
+                "202608011200;-999;0",
+                "202608011210;23.0;0",
+            ]
+        )
+        val, _dt = _parse_csv_tail(csv_bytes, "TT_10")
         assert val == 23.0
 
     def test_all_nan_returns_none(self):
-        csv_bytes = self._make_csv([
-            "202608011200;-999;0",
-            "202608011210;-999;0",
-        ])
+        csv_bytes = self._make_csv(
+            [
+                "202608011200;-999;0",
+                "202608011210;-999;0",
+            ]
+        )
         val, dt = _parse_csv_tail(csv_bytes, "TT_10")
         assert val is None
         assert dt is None
@@ -122,24 +129,28 @@ class TestParseCsvTail:
         assert dt is None
 
     def test_missing_column(self):
-        csv_bytes = self._make_csv([
-            "202608011200;22.5;0",
-        ])
+        csv_bytes = self._make_csv(
+            [
+                "202608011200;22.5;0",
+            ]
+        )
         val, dt = _parse_csv_tail(csv_bytes, "NONEXISTENT")
         assert val is None
         assert dt is None
 
     def test_missing_mess_datum_column(self):
         raw = b"TIME;VALUE\n202608011200;22.5"
-        val, dt = _parse_csv_tail(raw, "VALUE")
+        val, _dt = _parse_csv_tail(raw, "VALUE")
         assert val is None
 
     def test_returns_last_valid_row(self):
-        csv_bytes = self._make_csv([
-            "202608011200;20.0;0",
-            "202608011210;-999;0",
-            "202608011220;21.0;0",
-        ])
+        csv_bytes = self._make_csv(
+            [
+                "202608011200;20.0;0",
+                "202608011210;-999;0",
+                "202608011220;21.0;0",
+            ]
+        )
         val, dt = _parse_csv_tail(csv_bytes, "TT_10")
         assert val == 21.0
         assert dt.minute == 20
@@ -201,30 +212,36 @@ class TestProcessForecastDf:
         """Build a polars DataFrame matching the MosMix forecast schema."""
         all_rows = []
         for d, v in precip_rows:
-            all_rows.append({
-                "station_id": "1",
-                "parameter": "precipitation_height_significant_weather_last_1h",
-                "quantity": "precipitation_height",
-                "date": d,
-                "value": v,
-            })
+            all_rows.append(
+                {
+                    "station_id": "1",
+                    "parameter": "precipitation_height_significant_weather_last_1h",
+                    "quantity": "precipitation_height",
+                    "date": d,
+                    "value": v,
+                }
+            )
         for d, v in rad_rows:
-            all_rows.append({
-                "station_id": "1",
-                "parameter": "radiation_global",
-                "quantity": "radiation_global",
-                "date": d,
-                "value": v,
-            })
+            all_rows.append(
+                {
+                    "station_id": "1",
+                    "parameter": "radiation_global",
+                    "quantity": "radiation_global",
+                    "date": d,
+                    "value": v,
+                }
+            )
         if not all_rows:
             # Build an empty DataFrame with correct schema instead of Null types.
-            return pl.DataFrame({
-                "station_id": pl.Series([], dtype=pl.String),
-                "parameter": pl.Series([], dtype=pl.String),
-                "quantity": pl.Series([], dtype=pl.String),
-                "date": pl.Series([], dtype=pl.Datetime("us", "UTC")),
-                "value": pl.Series([], dtype=pl.Float64),
-            })
+            return pl.DataFrame(
+                {
+                    "station_id": pl.Series([], dtype=pl.String),
+                    "parameter": pl.Series([], dtype=pl.String),
+                    "quantity": pl.Series([], dtype=pl.String),
+                    "date": pl.Series([], dtype=pl.Datetime("us", "UTC")),
+                    "value": pl.Series([], dtype=pl.Float64),
+                }
+            )
         return pl.DataFrame(all_rows)
 
     def test_precip_30m_window(self):
@@ -305,3 +322,59 @@ class TestProcessForecastDf:
         df = self._make_df(rows, rad)
         result = _process_forecast_df(df, now)
         assert result["precip_30m"] is None
+
+
+class TestParseDirectoryListing:
+    def _make_pattern(self, prefix: str):
+        return re.compile(rf"10minutenwerte_{prefix}_(\d{{5}})_akt\.zip")
+
+    def test_valid_html_with_zip_files(self):
+        html = (
+            "<html><body>\n"
+            '<a href="10minutenwerte_TU_00250_akt.zip">10minutenwerte_TU_00250_akt.zip</a>\n'
+            '<a href="10minutenwerte_TU_00310_akt.zip">10minutenwerte_TU_00310_akt.zip</a>\n'
+            '<a href="10minutenwerte_TU_10420_akt.zip">10minutenwerte_TU_10420_akt.zip</a>\n'
+            "</body></html>"
+        )
+        pattern = self._make_pattern("TU")
+        result = _parse_directory_listing(html, pattern)
+        assert "00250" in result
+        assert "00310" in result
+        assert "10420" in result
+        assert len(result) == 3
+
+    def test_empty_html(self):
+        html = ""
+        pattern = self._make_pattern("TU")
+        result = _parse_directory_listing(html, pattern)
+        assert result == []
+
+    def test_no_matching_files(self):
+        html = '<html><body>\n<a href="some_other_file.txt">some_other_file.txt</a>\n</body></html>'
+        pattern = self._make_pattern("TU")
+        result = _parse_directory_listing(html, pattern)
+        assert result == []
+
+    def test_deduplicates_station_ids(self):
+        html = (
+            '<a href="10minutenwerte_wind_00250_akt.zip">10minutenwerte_wind_00250_akt.zip</a>\n'
+            '<a href="10minutenwerte_wind_00250_akt.zip">10minutenwerte_wind_00250_akt.zip</a>\n'
+            '<a href="10minutenwerte_wind_00310_akt.zip">10minutenwerte_wind_00310_akt.zip</a>\n'
+        )
+        pattern = self._make_pattern("wind")
+        result = _parse_directory_listing(html, pattern)
+        assert len(result) == 2
+        assert "00250" in result
+        assert "00310" in result
+
+    def test_various_zip_prefixes(self):
+        html = (
+            '<a href="10minutenwerte_nieder_00250_akt.zip">10minutenwerte_nieder_00250_akt.zip</a>\n'
+            '<a href="10minutenwerte_extrema_wind_10420_akt.zip">10minutenwerte_extrema_wind_10420_akt.zip</a>\n'
+        )
+        nieder_pattern = self._make_pattern("nieder")
+        extrema_pattern = self._make_pattern("extrema_wind")
+        nieder_result = _parse_directory_listing(html, nieder_pattern)
+        extrema_result = _parse_directory_listing(html, extrema_pattern)
+        assert nieder_result == ["00250"]
+        assert extrema_result == ["10420"]

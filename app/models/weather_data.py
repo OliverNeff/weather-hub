@@ -1,11 +1,11 @@
-from pydantic import BaseModel, Field
 from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 from app.models.weather_station import WeatherStation
 
 
 class WeatherData(BaseModel):
-
     # Status (Home Assistant compatible)
     status: str | None = None
 
@@ -14,12 +14,14 @@ class WeatherData(BaseModel):
     cloud_cover: int | None = None
 
     # Wind
-    wind_speed: float | None = None                    # m/s – aktuelle Windgeschwindigkeit
-    wind_gust: float | None = None                     # m/s – maximale Böe
+    wind_speed: float | None = None  # m/s – aktuelle Windgeschwindigkeit
+    wind_gust: float | None = None  # m/s – maximale Böe
 
     # Regen (aktuell)
-    precipitation_now: bool | None = None              # True wenn gerade Niederschlag gemessen oder sofort erwartet wird
-    precipitation_intensity: float | None = None       # mm/h – gemessene Regenintensität
+    precipitation_now: bool | None = (
+        None  # True wenn gerade Niederschlag gemessen oder sofort erwartet wird
+    )
+    precipitation_intensity: float | None = None  # mm/h – gemessene Regenintensität
 
     # Regen (Vorhersage)
 
@@ -52,14 +54,14 @@ class WeatherData(BaseModel):
     # mm/h – stärkste erwartete Niederschlagsintensität der nächsten 120 Minuten
 
     # Temperatur
-    temperature: float | None = None                   # °C – aktuelle Temperatur
-    feels_like: float | None = None                    # °C – gefühlte Temperatur
+    temperature: float | None = None  # °C – aktuelle Temperatur
+    feels_like: float | None = None  # °C – gefühlte Temperatur
 
     # UV / Sonne
-    uv_index: float | None = None                      # UV‑Index (0–16+), aus Globalstrahlung approximiert
-    sun_elevation: float | None = None                 # Grad – Sonnenhöhe über dem Horizont
-    sunrise: datetime | None = None                    # UTC – Sonnenaufgang heute
-    sunset: datetime | None = None                     # UTC – Sonnenuntergang heute
+    uv_index: float | None = None  # UV‑Index (0–16+), aus Globalstrahlung approximiert
+    sun_elevation: float | None = None  # Grad – Sonnenhöhe über dem Horizont
+    sunrise: datetime | None = None  # UTC – Sonnenaufgang heute
+    sunset: datetime | None = None  # UTC – Sonnenuntergang heute
 
     # Messstationen
     stations: list[WeatherStation] = Field(default_factory=list)
