@@ -70,8 +70,8 @@ _DATASETS = {
     },
 }
 
-# Distance limit for station search (km)
-_MAX_DISTANCE = 50.0
+# Distance limit for station search (km) (configurable via DWD_MAX_DISTANCE env var)
+_MAX_DISTANCE = int(os.environ.get("DWD_MAX_DISTANCE", "50"))
 
 # Number of nearest stations to use (configurable via DWD_STATIONS env var)
 _NUM_STATIONS = int(os.environ.get("DWD_STATIONS", "3"))
@@ -609,7 +609,7 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
 
     station_df = None
     try:
-        station_df = request.filter_by_distance(latlon=(lat, lon), distance=50.0).df
+        station_df = request.filter_by_distance(latlon=(lat, lon), distance=_MAX_DISTANCE).df
     except Exception as e:
         logger.error("dwd: forecast station lookup failed: %s", e)
         return _empty_forecast()
