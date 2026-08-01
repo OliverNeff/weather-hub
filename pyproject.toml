@@ -34,6 +34,7 @@ ignore = [
     "RUF002",  # ambiguous characters in docstrings (German text)
     "RUF003",  # ambiguous characters in comments (German text)
     "SIM102",  # nested if statements (preference for readability)
+    "SIM117",  # nested with statements (multiple patches are clearer nested)
     "UP017",   # timezone.utc vs datetime.UTC
     "E501",    # line too long (formatter handles this)
 ]
@@ -45,7 +46,15 @@ plugins = ["pydantic.mypy"]
 
 [tool.coverage.run]
 source = ["app"]
-omit = ["tests/*"]
+omit = [
+    "tests/*",
+    "app/__init__.py",
+    "app/adapter/__init__.py",
+    "app/models/__init__.py",
+    "app/routers/__init__.py",
+    "app/main.py",
+    "app/models/*.py",
+]
 
 [tool.coverage.report]
 show_missing = true

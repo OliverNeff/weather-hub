@@ -188,8 +188,7 @@ def _get_stations_for_param(param_key: str) -> list[dict[str, Any]]:
     if param_key in _station_cache:
         age = now - _station_cache_time.get(param_key, now)
         if age < _STATION_CACHE_TTL:
-            result = _station_cache[param_key]
-        return cast(list[dict[str, Any]], result)
+            return cast(list[dict[str, Any]], _station_cache[param_key])
 
     ds = _DATASETS[param_key]
 
