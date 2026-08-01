@@ -5,6 +5,14 @@ from app.models.weather_station import WeatherStation
 
 
 class WeatherData(BaseModel):
+
+    # Status (Home Assistant compatible)
+    status: str | None = None
+
+    # WMO weather code (from Open-Meteo)
+    weather_code: int | None = None
+    cloud_cover: int | None = None
+
     # Wind
     wind_speed: float | None = None                    # m/s – aktuelle Windgeschwindigkeit
     wind_gust: float | None = None                     # m/s – maximale Böe
@@ -52,13 +60,6 @@ class WeatherData(BaseModel):
     sun_elevation: float | None = None                 # Grad – Sonnenhöhe über dem Horizont
     sunrise: datetime | None = None                    # UTC – Sonnenaufgang heute
     sunset: datetime | None = None                     # UTC – Sonnenuntergang heute
-
-    # Status (Home Assistant compatible)
-    status: str | None = None
-
-    # WMO weather code (from Open-Meteo)
-    weather_code: int | None = None
-    cloud_cover: int | None = None
 
     # Messstationen
     stations: list[WeatherStation] = Field(default_factory=list)
