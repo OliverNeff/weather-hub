@@ -8,13 +8,10 @@ from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
 from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
 
-logger = logging.getLogger(__name__)  # noqa
+logger = logging.getLogger(__name__)
 from app.models.weather_data import WeatherData
 
-router = APIRouter(
-    prefix="/weather/data",
-    tags=["weather-data"]
-)
+router = APIRouter(prefix="/weather/data", tags=["weather-data"])
 
 # Home Assistant weather status values
 _STATUS_CLEAR_NIGHT = "clear-night"
@@ -88,15 +85,15 @@ def _pick_max(data: tuple, field: str):
     best = None
     for wd in data:
         val = getattr(wd, field)
-        if val is not None:
-            if best is None or val > best:
-                best = val
+        if val is not None and (best is None or val > best):
+            best = val
     return best
 
 
 def _sorted_by_freshness(data: tuple) -> list:
     """Sort adapters newest first. Adapters without a time go to the end."""
     now = datetime.now(timezone.utc)
+
     def _sort_key(wd):
         if not wd.stations:
             return now - timedelta(days=1)
@@ -104,6 +101,7 @@ def _sorted_by_freshness(data: tuple) -> list:
         if t is None:
             return now - timedelta(days=1)
         return t
+
     return sorted(data, key=_sort_key, reverse=True)
 
 
@@ -202,10 +200,7 @@ def _compute_status(wd: WeatherData) -> str | None:
 
 
 @router.get("", response_model=WeatherData)
-async def get_weather_data(
-    lat: float,
-    lon: float
-) -> WeatherData:
+async def get_weather_data(lat: float, lon: float) -> WeatherData:
     # Fetch all three adapters in parallel — each wrapped so one failure
     # doesn't take down the whole request.
     dwd, buienradar, openmeteo = await asyncio.gather(
@@ -222,7 +217,7 @@ async def get_weather_data(
 
     # Resolve temperature first — feels_like must come from the same adapter.
     temp_val, temp_adapter = _pick_first(fresh, "temperature")
-    setattr(merged, "temperature", temp_val)
+    merged.temperature = temp_val
 
     for field in _MERGEABLE_FIELDS:
         if field in ("time", "temperature", "feels_like"):
@@ -236,13 +231,10 @@ async def get_weather_data(
         setattr(merged, field, val)
 
     # feels_like: prefer the adapter that supplied temperature, fallback to freshest.
-    if temp_adapter is not None:
-        fl = getattr(temp_adapter, "feels_like", None)
-    else:
-        fl = None
+    fl = getattr(temp_adapter, "feels_like", None) if temp_adapter is not None else None
     if fl is None:
         fl, _ = _pick_first(fresh, "feels_like")
-    setattr(merged, "feels_like", fl)
+    merged.feels_like = fl
 
     # Compute precipitation_now: True if max measured intensity across adapters > 0.
     # DWD adapter already filters out stale observation data (>2h old).

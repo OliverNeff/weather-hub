@@ -19,5 +19,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Run tests
-        run: uv run pytest -v
+      - name: Lint check
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy app/
+
+      - name: "Run tests with coverage (target: >=80%)"
+        run: uv run pytest -v --cov=app --cov-report=term-missing

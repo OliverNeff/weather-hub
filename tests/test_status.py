@@ -221,6 +221,41 @@ def test_status_precip_zero_not_rainy():
     assert _compute_status(wd) is None
 
 
+def test_status_precip_exactly_5_not_pouring():
+    wd = WeatherData(precipitation_intensity=5.0)
+    assert _compute_status(wd) == "rainy"
+
+
+def test_status_precip_5_1_pouring():
+    wd = WeatherData(precipitation_intensity=5.1)
+    assert _compute_status(wd) == "pouring"
+
+
+def test_status_precip_extreme_pouring():
+    wd = WeatherData(precipitation_intensity=100.0)
+    assert _compute_status(wd) == "pouring"
+
+
+def test_status_windy_variant_at_50():
+    wd = WeatherData(wind_speed=50.0)
+    assert _compute_status(wd) == "windy-variant"
+
+
+def test_status_cold_but_sunny():
+    wd = WeatherData(temperature=-30.0, weather_code=0, sun_elevation=45.0)
+    assert _compute_status(wd) == "sunny"
+
+
+def test_status_sun_elevation_zenith():
+    wd = WeatherData(weather_code=0, sun_elevation=90.0)
+    assert _compute_status(wd) == "sunny"
+
+
+def test_status_wmo_52_freezing_drizzle_rainy():
+    wd = WeatherData(weather_code=52, precipitation_intensity=0)
+    assert _compute_status(wd) == "rainy"
+
+
 # ---------------------------------------------------------------------------
 # _pick_first()
 # ---------------------------------------------------------------------------
@@ -312,15 +347,9 @@ def test_pick_max_zero_is_valid():
 
 
 def test_sorted_newest_first():
-    a = WeatherData(
-        stations=[WeatherStation(time=_old)]
-    )
-    b = WeatherData(
-        stations=[WeatherStation(time=_now)]
-    )
-    c = WeatherData(
-        stations=[WeatherStation(time=_yesterday)]
-    )
+    a = WeatherData(stations=[WeatherStation(time=_old)])
+    b = WeatherData(stations=[WeatherStation(time=_now)])
+    c = WeatherData(stations=[WeatherStation(time=_yesterday)])
     result = _sorted_by_freshness((a, b, c))
     assert result[0] is b
     assert result[1] is c
@@ -328,21 +357,15 @@ def test_sorted_newest_first():
 
 
 def test_sorted_none_time_at_end():
-    a = WeatherData(
-        stations=[WeatherStation(time=_now)]
-    )
-    b = WeatherData(
-        stations=[WeatherStation(time=None)]
-    )
+    a = WeatherData(stations=[WeatherStation(time=_now)])
+    b = WeatherData(stations=[WeatherStation(time=None)])
     result = _sorted_by_freshness((a, b))
     assert result[0] is a
     assert result[1] is b
 
 
 def test_sorted_no_stations_at_end():
-    a = WeatherData(
-        stations=[WeatherStation(time=_now)]
-    )
+    a = WeatherData(stations=[WeatherStation(time=_now)])
     b = WeatherData()
     result = _sorted_by_freshness((a, b))
     assert result[0] is a

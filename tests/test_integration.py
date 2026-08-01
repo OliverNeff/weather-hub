@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
-
-import pytest
 from unittest.mock import patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
@@ -42,22 +41,33 @@ def _make_weather_data(
     )
     if station_time is None:
         station_time = datetime.now(timezone.utc)
-    wd.stations.append(WeatherStation(
-        source=source,
-        name=f"Test {source}",
-        lat=50.0,
-        lon=9.0,
-        time=station_time,
-    ))
+    wd.stations.append(
+        WeatherStation(
+            source=source,
+            name=f"Test {source}",
+            lat=50.0,
+            lon=9.0,
+            time=station_time,
+        )
+    )
     return wd
 
 
 @pytest.mark.asyncio
 async def test_endpoint_returns_200(client):
     with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=_make_weather_data(temperature=20.0, source="dwd")),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(source="buienradar")),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=_make_weather_data(source="openmeteo")),
+        patch(
+            "app.routers.weather_data.fetch_wetterdienst_weather",
+            return_value=_make_weather_data(temperature=20.0, source="dwd"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(source="buienradar"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            return_value=_make_weather_data(source="openmeteo"),
+        ),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         assert resp.status_code == 200
@@ -66,9 +76,18 @@ async def test_endpoint_returns_200(client):
 @pytest.mark.asyncio
 async def test_endpoint_has_all_fields(client):
     with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=_make_weather_data(source="dwd")),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(source="buienradar")),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=_make_weather_data(source="openmeteo")),
+        patch(
+            "app.routers.weather_data.fetch_wetterdienst_weather",
+            return_value=_make_weather_data(source="dwd"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(source="buienradar"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            return_value=_make_weather_data(source="openmeteo"),
+        ),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
@@ -85,8 +104,14 @@ async def test_status_computed(client):
     wd = _make_weather_data(temperature=20.0, precipitation_intensity=3.0, source="dwd")
     with (
         patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=wd),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(source="buienradar")),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=_make_weather_data(source="openmeteo")),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(source="buienradar"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            return_value=_make_weather_data(source="openmeteo"),
+        ),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
@@ -95,10 +120,18 @@ async def test_status_computed(client):
 
 @pytest.mark.asyncio
 async def test_status_sunny_when_clear(client):
-    wd = _make_weather_data(temperature=25.0, weather_code=0, sun_elevation=45.0, source="openmeteo")
+    wd = _make_weather_data(
+        temperature=25.0, weather_code=0, sun_elevation=45.0, source="openmeteo"
+    )
     with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=_make_weather_data(source="dwd")),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(source="buienradar")),
+        patch(
+            "app.routers.weather_data.fetch_wetterdienst_weather",
+            return_value=_make_weather_data(source="dwd"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(source="buienradar"),
+        ),
         patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=wd),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
@@ -109,9 +142,18 @@ async def test_status_sunny_when_clear(client):
 @pytest.mark.asyncio
 async def test_stations_from_all_adapters(client):
     with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=_make_weather_data(source="dwd")),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(source="buienradar")),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=_make_weather_data(source="openmeteo")),
+        patch(
+            "app.routers.weather_data.fetch_wetterdienst_weather",
+            return_value=_make_weather_data(source="dwd"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(source="buienradar"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            return_value=_make_weather_data(source="openmeteo"),
+        ),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
@@ -124,9 +166,17 @@ async def test_stations_from_all_adapters(client):
 @pytest.mark.asyncio
 async def test_one_adapter_failure_does_not_break(client):
     with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", side_effect=RuntimeError("boom")),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(temperature=20.0, source="buienradar")),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=_make_weather_data(source="openmeteo")),
+        patch(
+            "app.routers.weather_data.fetch_wetterdienst_weather", side_effect=RuntimeError("boom")
+        ),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(temperature=20.0, source="buienradar"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            return_value=_make_weather_data(source="openmeteo"),
+        ),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         assert resp.status_code == 200
@@ -188,8 +238,14 @@ async def test_precipitation_now_true(client):
     wd = _make_weather_data(precipitation_intensity=2.5, source="dwd")
     with (
         patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=wd),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(source="buienradar")),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=_make_weather_data(source="openmeteo")),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(source="buienradar"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            return_value=_make_weather_data(source="openmeteo"),
+        ),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
@@ -201,9 +257,38 @@ async def test_precipitation_now_false(client):
     wd = _make_weather_data(precipitation_intensity=0.0, source="dwd")
     with (
         patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=wd),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=_make_weather_data(source="buienradar")),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=_make_weather_data(source="openmeteo")),
+        patch(
+            "app.routers.weather_data.fetch_buienradar_weather",
+            return_value=_make_weather_data(source="buienradar"),
+        ),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            return_value=_make_weather_data(source="openmeteo"),
+        ),
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
         assert data["precipitation_now"] is False
+
+
+@pytest.mark.asyncio
+async def test_only_openmeteo_fails(client):
+    dwd_wd = _make_weather_data(temperature=20.0, source="dwd")
+    bu_wd = _make_weather_data(wind_speed=8.0, source="buienradar")
+    with (
+        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=dwd_wd),
+        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=bu_wd),
+        patch(
+            "app.routers.weather_data.fetch_openmeteo_weather",
+            side_effect=RuntimeError("openmeteo down"),
+        ),
+    ):
+        resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["temperature"] == 20.0
+        assert data["wind_speed"] == 8.0
+        sources = [s["source"] for s in data["stations"]]
+        assert "dwd" in sources
+        assert "buienradar" in sources
+        assert "openmeteo" not in sources

@@ -1,7 +1,6 @@
 """DWD weather adapter — observation via plain httpx, forecast via wetterdienst."""
 
 import asyncio
-import csv
 import io
 import logging
 import math
@@ -9,12 +8,11 @@ import os
 import re
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
 import polars as pl
-
 from wetterdienst.provider.dwd.mosmix import DwdMosmixRequest
 from wetterdienst.settings import Settings
 
@@ -132,6 +130,7 @@ def _http_get_text(url: str) -> str:
 # Station discovery
 # ---------------------------------------------------------------------------
 
+
 def _parse_station_tsv(text: str) -> list[dict[str, Any]]:
     """Parse the DWD station description file.
 
@@ -140,14 +139,14 @@ def _parse_station_tsv(text: str) -> list[dict[str, Any]]:
     """
     stations = []
     pattern = re.compile(
-        r"^(\d{5})\s+"          # station id (5 digits)
-        r"\d{8}\s+"             # von_datum (skip)
-        r"\d{8}\s+"             # bis_datum (skip)
-        r"\d+\s+"               # Stationshoehe (skip)
-        r"([\d.]+)\s+"          # geoBreite
-        r"([\d.]+)\s+"          # geoLaenge
-        r"(\S+[\S\s]*?)"       # Stationsname (rest of meaningful content)
-        r"\s{2,}",              # Bundesland separator (2+ spaces before state name)
+        r"^(\d{5})\s+"  # station id (5 digits)
+        r"\d{8}\s+"  # von_datum (skip)
+        r"\d{8}\s+"  # bis_datum (skip)
+        r"\d+\s+"  # Stationshoehe (skip)
+        r"([\d.]+)\s+"  # geoBreite
+        r"([\d.]+)\s+"  # geoLaenge
+        r"(\S+[\S\s]*?)"  # Stationsname (rest of meaningful content)
+        r"\s{2,}",  # Bundesland separator (2+ spaces before state name)
     )
     for line in text.strip().split("\n")[2:]:  # skip header + separator
         m = pattern.match(line)
@@ -220,9 +219,7 @@ def _get_stations_for_param(param_key: str) -> list[dict[str, Any]]:
             except Exception:
                 precip_stations = []
 
-            _station_cache[cache_key] = {
-                s["id"]: s for s in precip_stations
-            }
+            _station_cache[cache_key] = {s["id"]: s for s in precip_stations}
             _station_cache_time[cache_key] = now
 
         lookup = _station_cache.get(cache_key, {})
@@ -244,10 +241,10 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) ** 2
-         + math.cos(math.radians(lat1))
-         * math.cos(math.radians(lat2))
-         * math.sin(dlon / 2) ** 2)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    )
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
@@ -272,6 +269,7 @@ def _find_nearest_stations(
 # ---------------------------------------------------------------------------
 # Station data fetcher
 # ---------------------------------------------------------------------------
+
 
 def _parse_csv_tail(raw_bytes: bytes, column_name: str) -> tuple[float | None, datetime | None]:
     """Parse only the last ~30 lines of a DWD CSV to find the latest value.
@@ -371,6 +369,7 @@ def _purge_zip_cache() -> None:
 # Observation fetch
 # ---------------------------------------------------------------------------
 
+
 def _get_all_stations() -> list[dict[str, Any]]:
     """Get a deduplicated list of all stations across all datasets.
 
@@ -415,13 +414,18 @@ def _fetch_param_from_stations(
                     ds["csv_column"],
                     ds["dir"],
                 )
-                return (param_key, val, dt, {
-                    "id": st["id"],
-                    "station_name": st["name"],
-                    "lat": st["lat"],
-                    "lon": st["lon"],
-                    "distance": st["distance"],
-                })
+                return (
+                    param_key,
+                    val,
+                    dt,
+                    {
+                        "id": st["id"],
+                        "station_name": st["name"],
+                        "lat": st["lat"],
+                        "lon": st["lon"],
+                        "distance": st["distance"],
+                    },
+                )
             except Exception:
                 return (param_key, None, None, None)
 
@@ -433,7 +437,12 @@ def _fetch_param_from_stations(
             if val is not None and si is not None:
                 logger.info(
                     "dwd: %s = %s from station %s (%s, %.1fkm) at %s",
-                    pk, val, si["id"], si["station_name"], si["distance"], dt,
+                    pk,
+                    val,
+                    si["id"],
+                    si["station_name"],
+                    si["distance"],
+                    dt,
                 )
     except httpx.HTTPError as e:
         logger.warning("dwd: HTTP error fetching %s: %s", param_key, e)
@@ -471,10 +480,7 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 
     # Split into rounds: _NUM_STATIONS per round. Fetch successive rounds
     # until we have enough stations with data or run out of candidates.
-    rounds = [
-        candidates[i:i + _NUM_STATIONS]
-        for i in range(0, len(candidates), _NUM_STATIONS)
-    ]
+    rounds = [candidates[i : i + _NUM_STATIONS] for i in range(0, len(candidates), _NUM_STATIONS)]
 
     all_results: list[tuple[str, float | None, datetime | None, dict | None]] = []
     stations_seen: dict[str, dict] = {}
@@ -493,8 +499,7 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             round_results = []
             with ThreadPoolExecutor(max_workers=len(param_keys)) as pool:
                 futs = [
-                    pool.submit(_fetch_param_from_stations, pk, round_to_try)
-                    for pk in param_keys
+                    pool.submit(_fetch_param_from_stations, pk, round_to_try) for pk in param_keys
                 ]
                 for f in futs:
                     round_results.extend(f.result())
@@ -525,7 +530,8 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             if pk == "precipitation" and dt and dt < stale_threshold:
                 logger.warning(
                     "dwd: discarding stale precip for %s (timestamp %s)",
-                    station_info.get("station_name", "?") if station_info else "?", dt,
+                    station_info.get("station_name", "?") if station_info else "?",
+                    dt,
                 )
                 continue
             sid = station_info["id"] if station_info else None
@@ -535,15 +541,14 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
 
         # Check: do we have enough stations with data? If not, load next round.
         round_idx += 1
-        stations_with_data = sum(
-            1 for v in stations_seen.values() if v["time"] is not None
-        )
+        stations_with_data = sum(1 for v in stations_seen.values() if v["time"] is not None)
         if stations_with_data >= _NUM_STATIONS:
             break
         if round_idx < len(rounds):
             logger.info(
                 "dwd: %d/%d stations with data, fetching next round",
-                stations_with_data, _NUM_STATIONS,
+                stations_with_data,
+                _NUM_STATIONS,
             )
 
     # Build primary values from all results — pick freshest per parameter.
@@ -681,6 +686,7 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
 # Public entry point
 # ---------------------------------------------------------------------------
 
+
 async def fetch_wetterdienst_weather(
     latitude: float,
     longitude: float,
@@ -729,13 +735,15 @@ async def fetch_wetterdienst_weather(
     )
 
     for station_data in all_stations:
-        weather_data.stations.append(WeatherStation(
-            source="dwd",
-            name=station_data["station_name"],
-            lat=station_data["lat"],
-            lon=station_data["lon"],
-            time=station_data.get("time"),
-        ))
+        weather_data.stations.append(
+            WeatherStation(
+                source="dwd",
+                name=station_data["station_name"],
+                lat=station_data["lat"],
+                lon=station_data["lon"],
+                time=station_data.get("time"),
+            )
+        )
 
     return weather_data
 
@@ -743,6 +751,7 @@ async def fetch_wetterdienst_weather(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _empty_observation() -> dict[str, Any]:
     return {

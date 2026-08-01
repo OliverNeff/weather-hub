@@ -66,9 +66,7 @@ class TestWeatherData:
         wd = WeatherData(
             sunrise=sunrise,
             sunset=sunset,
-            stations=[
-                WeatherStation(source="dwd", name="Test", lat=50.0, lon=9.0)
-            ],
+            stations=[WeatherStation(source="dwd", name="Test", lat=50.0, lon=9.0)],
         )
         data = wd.model_dump()
         assert data["sunrise"] is not None

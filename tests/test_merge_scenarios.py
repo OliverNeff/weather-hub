@@ -1,11 +1,9 @@
 """Scenario-driven integration tests for merge logic and transitions."""
 
-from datetime import datetime, timezone, timedelta
-
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
-
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
@@ -57,13 +55,15 @@ def _wd(
     )
     if station_time is None:
         station_time = datetime.now(timezone.utc)
-    wd.stations.append(WeatherStation(
-        source=source,
-        name=f"Test {source}",
-        lat=50.0,
-        lon=9.0,
-        time=station_time,
-    ))
+    wd.stations.append(
+        WeatherStation(
+            source=source,
+            name=f"Test {source}",
+            lat=50.0,
+            lon=9.0,
+            time=station_time,
+        )
+    )
     return wd
 
 

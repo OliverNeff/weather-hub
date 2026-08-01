@@ -1,17 +1,16 @@
-import math
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.adapter.openmeteo import (
+    _current_precip_from_minutely,
+    _kmh,
+    _noaa_elevation,
+    _parse_hourly_precipitation,
+    _parse_iso,
+    _parse_minutely_precipitation,
+    _parse_sun,
     _sf,
     _si,
-    _kmh,
-    _parse_iso,
-    _noaa_elevation,
-    _current_precip_from_minutely,
-    _parse_minutely_precipitation,
-    _parse_hourly_precipitation,
 )
-
 
 # ---------------------------------------------------------------------------
 # _sf — float extraction with NaN handling
@@ -184,7 +183,12 @@ class TestCurrentPrecipFromMinutely:
         assert _current_precip_from_minutely(data, now) is None
 
     def test_empty_data(self):
-        assert _current_precip_from_minutely({"time": [], "precipitation": []}, datetime.now(timezone.utc)) is None
+        assert (
+            _current_precip_from_minutely(
+                {"time": [], "precipitation": []}, datetime.now(timezone.utc)
+            )
+            is None
+        )
 
     def test_no_times_key(self):
         assert _current_precip_from_minutely({}, datetime.now(timezone.utc)) is None
@@ -253,9 +257,7 @@ class TestParseMinutelyPrecipitation:
 
     def test_all_windows_populated(self):
         now = self._make_now()
-        times = [
-            (now + timedelta(minutes=15 * i)).isoformat() for i in range(8)
-        ]
+        times = [(now + timedelta(minutes=15 * i)).isoformat() for i in range(8)]
         data = {"time": times, "precipitation": [0.5] * 8}
         result = _parse_minutely_precipitation(data, {}, now)
         assert result["precipitation_next_30m"] is True
@@ -457,3 +459,95 @@ class TestParseHourlyPrecipitation:
         result = _parse_hourly_precipitation(data, now)
         assert result["precipitation_amount_next_30m"] == 2.0
         assert result["precipitation_amount_next_1h"] == 3.0
+
+
+# ---------------------------------------------------------------------------
+# _parse_iso — timezone conversion
+# ---------------------------------------------------------------------------
+
+
+class TestParseIsoTimezone:
+    def test_iso_with_positive_offset_converts_to_utc(self):
+        result = _parse_iso("2026-08-01T14:00:00+02:00")
+        expected = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_iso_with_negative_offset_converts_to_utc(self):
+        result = _parse_iso("2026-08-01T10:00:00-02:00")
+        expected = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_iso_with_utc_offset_stays_same(self):
+        result = _parse_iso("2026-08-01T12:00:00+00:00")
+        expected = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_naive_iso_assumed_utc(self):
+        result = _parse_iso("2026-08-01T12:00:00")
+        expected = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_iso_with_offset_z_stays_utc(self):
+        result = _parse_iso("2026-08-01T12:00:00Z")
+        expected = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# _parse_sun — sunrise/sunset parsing + elevation
+# ---------------------------------------------------------------------------
+
+
+class TestParseSun:
+    def test_normal_sunrise_sunset(self):
+        daily = {
+            "sunrise": ["2026-08-01T04:30:00+00:00"],
+            "sunset": ["2026-08-01T20:15:00+00:00"],
+        }
+        sunrise, sunset, elevation = _parse_sun(daily, 50.0, 9.0)
+        assert sunrise == datetime(2026, 8, 1, 4, 30, 0, tzinfo=timezone.utc)
+        assert sunset == datetime(2026, 8, 1, 20, 15, 0, tzinfo=timezone.utc)
+        assert isinstance(elevation, float)
+
+    def test_empty_daily_arrays(self):
+        daily = {
+            "sunrise": [],
+            "sunset": [],
+        }
+        sunrise, sunset, elevation = _parse_sun(daily, 50.0, 9.0)
+        assert sunrise is None
+        assert sunset is None
+        assert isinstance(elevation, float)
+
+    def test_missing_sunrise_key(self):
+        daily = {"sunset": ["2026-08-01T20:15:00+00:00"]}
+        sunrise, sunset, elevation = _parse_sun(daily, 50.0, 9.0)
+        assert sunrise is None
+        assert sunset == datetime(2026, 8, 1, 20, 15, 0, tzinfo=timezone.utc)
+        assert isinstance(elevation, float)
+
+    def test_invalid_iso_in_sunrise(self):
+        daily = {
+            "sunrise": ["not-a-date"],
+            "sunset": ["2026-08-01T20:15:00+00:00"],
+        }
+        sunrise, sunset, elevation = _parse_sun(daily, 50.0, 9.0)
+        assert sunrise is None
+        assert sunset == datetime(2026, 8, 1, 20, 15, 0, tzinfo=timezone.utc)
+        assert isinstance(elevation, float)
+
+    def test_empty_daily_dict(self):
+        daily = {}
+        sunrise, sunset, elevation = _parse_sun(daily, 50.0, 9.0)
+        assert sunrise is None
+        assert sunset is None
+        assert isinstance(elevation, float)
+
+    def test_sunrise_sunset_with_non_utc_offset(self):
+        daily = {
+            "sunrise": ["2026-08-01T06:30:00+02:00"],
+            "sunset": ["2026-08-01T22:15:00+02:00"],
+        }
+        sunrise, sunset, _elevation = _parse_sun(daily, 50.0, 9.0)
+        assert sunrise == datetime(2026, 8, 1, 4, 30, 0, tzinfo=timezone.utc)
+        assert sunset == datetime(2026, 8, 1, 20, 15, 0, tzinfo=timezone.utc)

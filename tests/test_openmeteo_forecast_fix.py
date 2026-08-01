@@ -5,11 +5,11 @@ Also tests the time-window boundary issue: minutely_15 data spans the full day,
 so at 18:25 there are only 1-2 intervals left in the 30m window.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.adapter.openmeteo import (
-    _parse_minutely_precipitation,
     _parse_hourly_precipitation,
+    _parse_minutely_precipitation,
 )
 
 
@@ -89,7 +89,7 @@ class TestFullDayForecastCoverage:
         now = datetime(2026, 8, 1, 18, 25, 0, tzinfo=timezone.utc)
         # Only intervals in the evening
         times = [
-            (now + timedelta(minutes=5)).isoformat(),   # 18:30
+            (now + timedelta(minutes=5)).isoformat(),  # 18:30
             (now + timedelta(minutes=20)).isoformat(),  # 18:45
             (now + timedelta(minutes=35)).isoformat(),  # 19:00 (1h window)
         ]
@@ -102,7 +102,7 @@ class TestFullDayForecastCoverage:
         """At 18:25, if rain starts at 18:45, the 30m window catches it."""
         now = datetime(2026, 8, 1, 18, 25, 0, tzinfo=timezone.utc)
         times = [
-            (now + timedelta(minutes=5)).isoformat(),   # 18:30
+            (now + timedelta(minutes=5)).isoformat(),  # 18:30
             (now + timedelta(minutes=20)).isoformat(),  # 18:45
         ]
         data = {"time": times, "precipitation": [0.0, 0.5]}

@@ -1,6 +1,7 @@
-import httpx
-from datetime import datetime, timezone, timedelta
 import math
+from datetime import datetime, timedelta, timezone
+
+import httpx
 
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
@@ -16,9 +17,7 @@ _KMH_TO_MS = 1 / 3.6
 _session = httpx.AsyncClient(timeout=10)
 
 
-async def fetch_openmeteo_weather(
-    latitude: float, longitude: float
-) -> WeatherData:
+async def fetch_openmeteo_weather(latitude: float, longitude: float) -> WeatherData:
     """
     Holt aktuelle Wetterdaten + Vorhersage + sunrise/sunset von Open-Meteo.
     """
@@ -89,7 +88,9 @@ async def fetch_openmeteo_weather(
 def _empty(lat: float, lon: float) -> WeatherData:
     data = WeatherData()
     data.stations.append(
-        WeatherStation(source="openmeteo", name="computed", lat=lat, lon=lon, time=datetime.now(timezone.utc))
+        WeatherStation(
+            source="openmeteo", name="computed", lat=lat, lon=lon, time=datetime.now(timezone.utc)
+        )
     )
     return data
 
@@ -97,6 +98,7 @@ def _empty(lat: float, lon: float) -> WeatherData:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _sf(d: dict, key: str):
     """Extract a single float value, None if missing or NaN."""
@@ -126,7 +128,9 @@ def _parse_iso(s: str | None):
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(s)
+        dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+        return dt
     except Exception:
         return None
 
