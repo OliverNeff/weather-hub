@@ -1,8 +1,8 @@
 # Weather Hub
 
-FastAPI microservice that aggregates weather data from multiple providers and exposes it via a single REST endpoint.
+Weather Hub ist ein FastAPI-Mikrodienst, der Wetterdaten mehrerer Anbieter aggregiert und ueber eine einzige REST-Schnittstelle bereitstellt.
 
-## Quick Start
+## Starten
 
 ```bash
 uv sync
@@ -10,66 +10,60 @@ uv run uvicorn app.main:app --reload
 curl "http://127.0.0.1:8000/weather/data?lat=49.87&lon=8.93"
 ```
 
-[OpenAPI docs](http://127.0.0.1:8000/docs) are available at `/docs` when the server is running.
+Die [OpenAPI-Dokumentation](http://127.0.0.1:8000/docs) ist unter `/docs` erhaeltbar.
 
-## Tech Stack
-
-- **Runtime**: Python 3.12+ (managed by [`uv`](https://github.com/astral-sh/uv))
-- **Framework**: FastAPI
-- **Dependencies**: buienradar, wetterdienst, openmeteo-requests, httpx, pandas, polars
-
-## Endpoint
+## Wetterdaten-Anfrage
 
 ```
-GET /weather/data?lat=<latitude>&lon=<longitude>
+GET /weather/data?lat=<Breitengrad>&lon=<Laengengrad>
 ```
 
-Returns current conditions plus 30m/1h/2h precipitation forecast as JSON.
+Liefert aktuelle Wetterbedingungen sowie Niederschlagsvorhersage fuer die naechsten 30 Minuten, 1 und 2 Stunden als JSON.
 
-### Response Schema
+### Antwort-Schema
 
-| Field | Type | Description |
+| Feld | Typ | Beschreibung |
 |---|---|---|
 | **Wind** | | |
-| `wind_speed` | `float \| null` | Current wind speed in m/s |
-| `wind_gust` | `float \| null` | Maximum wind gust in m/s |
-| **Precipitation (current)** | | |
-| `precipitation_now` | `bool \| null` | `true` if precipitation is currently measured |
-| `precipitation_intensity` | `float \| null` | Current precipitation rate in mm/h |
-| **Precipitation (forecast)** | | |
-| `precipitation_next_30m` | `bool \| null` | Rain expected in the next 30 minutes |
-| `precipitation_amount_next_30m` | `float \| null` | Expected precipitation in mm (next 30m) |
-| `precipitation_intensity_next_30m` | `float \| null` | Peak intensity in mm/h (next 30m) |
-| `precipitation_next_1h` | `bool \| null` | Rain expected in the next hour |
-| `precipitation_amount_next_1h` | `float \| null` | Expected precipitation in mm (next 1h) |
-| `precipitation_intensity_next_1h` | `float \| null` | Peak intensity in mm/h (next 1h) |
-| `precipitation_next_2h` | `bool \| null` | Rain expected in the next 2 hours |
-| `precipitation_amount_next_2h` | `float \| null` | Expected precipitation in mm (next 2h) |
-| `precipitation_intensity_next_2h` | `float \| null` | Peak intensity in mm/h (next 2h) |
-| **Temperature** | | |
-| `temperature` | `float \| null` | Current temperature in °C |
-| `feels_like` | `float \| null` | Apparent temperature in °C |
-| **UV / Sun** | | |
-| `uv_index` | `float \| null` | UV index (0–16+) |
-| `sun_elevation` | `float \| null` | Sun elevation in degrees (negative when below horizon) |
-| `sunrise` | `datetime \| null` | Today's sunrise (UTC) |
-| `sunset` | `datetime \| null` | Today's sunset (UTC) |
-| **Stations** | | |
-| `stations` | `list[WeatherStation]` | All contributing weather stations (see below) |
+| `wind_speed` | `float \| null` | Aktuelle Windgeschwindigkeit in m/s |
+| `wind_gust` | `float \| null` | Maximale Windböe in m/s |
+| **Niederschlag (aktuell)** | | |
+| `precipitation_now` | `bool \| null` | `true`, wenn aktuell Niederschlag gemessen wird |
+| `precipitation_intensity` | `float \| null` | Aktuelle Regenintensität in mm/h |
+| **Niederschlag (Vorhersage)** | | |
+| `precipitation_next_30m` | `bool \| null` | Regen in den naechsten 30 Minuten erwartet |
+| `precipitation_amount_next_30m` | `float \| null` | Erwartete Niederschlagsmenge in mm (naechste 30 Min) |
+| `precipitation_intensity_next_30m` | `float \| null` | Staerkste erwartete Intensitaet in mm/h (naechste 30 Min) |
+| `precipitation_next_1h` | `bool \| null` | Regen in der naechsten Stunde erwartet |
+| `precipitation_amount_next_1h` | `float \| null` | Erwartete Niederschlagsmenge in mm (naechste 1 Std) |
+| `precipitation_intensity_next_1h` | `float \| null` | Staerkste erwartete Intensitaet in mm/h (naechste 1 Std) |
+| `precipitation_next_2h` | `bool \| null` | Regen in den naechsten 2 Stunden erwartet |
+| `precipitation_amount_next_2h` | `float \| null` | Erwartete Niederschlagsmenge in mm (naechste 2 Std) |
+| `precipitation_intensity_next_2h` | `float \| null` | Staerkste erwartete Intensitaet in mm/h (naechste 2 Std) |
+| **Temperatur** | | |
+| `temperature` | `float \| null` | Aktuelle Temperatur in °C |
+| `feels_like` | `float \| null` | Gefuehlte Temperatur in °C |
+| **UV / Sonne** | | |
+| `uv_index` | `float \| null` | UV-Index (0–16+) |
+| `sun_elevation` | `float \| null` | Sonnenhoehe in Grad (negativ, wenn unter dem Horizont) |
+| `sunrise` | `datetime \| null` | Sonnenaufgang heute (UTC) |
+| `sunset` | `datetime \| null` | Sonnenuntergang heute (UTC) |
+| **Stationen** | | |
+| `stations` | `list[WeatherStation]` | Alle beteiligten Wetterstationen (siehe unten) |
 
-All fields are nullable — a `null` means the adapter did not return data for that field.
+Alle Felder sind optional — `null` bedeutet, dass der Anbieter keine Daten fuer dieses Feld lieferte.
 
-### Station Object
+### Stations-Objekt
 
-| Field | Type | Description |
+| Feld | Typ | Beschreibung |
 |---|---|---|
-| `source` | `str` | Adapter name: `dwd`, `openmeteo`, or `buienradar` |
-| `name` | `str` | Station name |
-| `lat` | `float` | Station latitude |
-| `lon` | `float` | Station longitude |
-| `time` | `datetime \| null` | Timestamp of the measurement (UTC) |
+| `source` | `str` | Datenanbieter: `dwd`, `openmeteo` oder `buienradar` |
+| `name` | `str` | Stationsname |
+| `lat` | `float` | Breitengrad der Station |
+| `lon` | `float` | Laengengrad der Station |
+| `time` | `datetime \| null` | Zeitstempel der Messung (UTC) |
 
-## Architecture
+## Architektur
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -86,92 +80,74 @@ All fields are nullable — a `null` means the adapter did not return data for t
 │    │ Obs: rain │     │ wind      │     │ precip 1h    │            │
 │    │ forecast: │     │ sunrise   │     │ precip 2h    │            │
 │    │  precip   │     │ feels_like│     │ temp (NL)    │            │
-│    │  uv (est) │     │ sun elev  │     │ wind (NL)    │            │
+│    │  uv (est) │     │ sonnenhoehe│    │ wind (NL)    │            │
 │    └───────────┘     └───────────┘     └──────────────┘            │
 │          │                   │                   │                  │
 │          └───────────────────┼───────────────────┘                  │
 │                              ▼                                      │
-│                    Merge strategy (see below)                       │
+│                    Merge-Strategie (siehe unten)                    │
 │                              │                                      │
 │                              ▼                                      │
-│                      Single JSON response                           │
+│                      Einzelne JSON-Antwort                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-All 3 adapters run in parallel. A single adapter failure does not take down the response.
+Alle drei Datenanbieter laufen parallel. Ein einzelner Anbieterausfall beeinflusst nicht die gesamte Antwort.
 
-## Providers
+## Datenanbieter
 
-| Provider | Strengths | Coverage | Typical latency |
+| Anbieter | Starkpunkte | Abdeckung | Typische Antwortzeit |
 |---|---|---|---|
-| **Open-Meteo** | UV index (accurate), sunrise/sunset, feels_like, global coverage | Worldwide | < 1s |
-| **DWD** | German station data (temperature, wind, precipitation observation) | Germany | ~7s cold, ~0.3s cached |
-| **Buienradar** | Radar-based precipitation forecast (30m/1h/2h), excellent real-time radar | NL stations + DE radar | < 1s |
+| **Open-Meteo** | Genauer UV-Index, Sonnenauf-/untergang, gefuehlte Temperatur, weltweite Abdeckung | Weltweit | < 1s |
+| **DWD** | Deutsche Stationsdaten (Temperatur, Wind, Niederschlag) | Deutschland | ~7s (kalt), ~0,3s (gecacht) |
+| **Buienradar** | Radar-basierte Niederschlagsvorhersage (30 Min/1 Std/2 Std) | NL-Stationen + DE-Radar | < 1s |
 
 ### DWD (`wetterdienst_dwd.py`)
 
-Combines two DWD sources:
+Kombiniert zwei DWD-Datenquellen:
 
-**Observation** — Fetches temperature, wind_speed, wind_gust, and precipitation from the `recent` period (10-minute resolution). Each parameter is fetched in a separate request targeting the nearest station that reports it. The 4 requests run in parallel via `ThreadPoolExecutor`.
+**Beobachtung** — Liefert Temperatur, Windgeschwindigkeit, Windböen und Niederschlag aus dem `recent`-Zeitraum (10-Minuten-Aeolung). Jeder Parameter wird in einer eigenen Anfrage abgerufen, dabei die jeweils naechste Station, die den Parameter meldet. Die vier Anfragen laufen parallel via `ThreadPoolExecutor`.
 
-**Forecast** — Hourly MosMix Small prognoses for precipitation and radiation. Builds 30m/1h/2h windows from now, averages the precip values in each window for amount and intensity. UV index is approximated from global radiation with `* 0.019`, clamped to 0–16 (rough estimate).
+**Vorhersage** — Stündliche MosMix Small-Prognosen fuer Niederschlag und Strahlung. Bildet Fenster fuer 30 Min/1 Std/2 Std und mittelt die Niederschlagswerte. Der UV-Index wird aus Globalstrahlung mit `* 0.019` approximiert und auf 0–16 begrenzt (Grobe Schaeztung).
 
-**Caching** — Two layers:
-1. **In-memory MosMix cache** — 10-minute TTL, keyed by `{lat:.2f},{lon:.2f}`. MosMix updates every 1–3 hours.
-2. **fsspec disk cache** — Controlled by `DWD_CACHE` env var. When enabled, speeds up repeated requests from ~7s to ~0.3s. Returns empty results are retried once after clearing the cache.
+**Caching** — Zwei Ebenen:
+1. **In-Memory MosMix-Cache** — 10 Minuten TTL, nach `{lat:.2f},{lon:.2f}` getastet. MosMix aktualisiert sich alle 1–3 Stunden.
+2. **fsspec Disk-Cache** — Steuert die Umgebungsvariable `DWD_CACHE`. Wenn aktiviert, beschleunigt wiederholte Anfragen von ~7s auf ~0,3s. Leere Ergebnisse werden nach Cache-Loeschung einmal erneut abgerufen.
 
 ### Open-Meteo (`openmeteo.py`)
 
-Plain HTTP/JSON client (`httpx`), no FFI bindings. Returns current temperature, apparent_temperature, wind_speed, wind_gust, precipitation, uv_index, sunrise, sunset.
+Plain HTTP/JSON Client (`httpx`), ohne FFI-Bindings. Liefert aktuelle Temperatur, gefuehlte Temperatur, Windgeschwindigkeit, Windböen, Niederschlag, UV-Index, Sonnenaufgang und Sonnenuntergang.
 
-Sun elevation is computed using the NOAA formula. Returns negative values when the sun is below the horizon (nighttime).
+Die Sonnenhoehe wird mit der NOAA-Formel berechnet. Liefert negative Werte, wenn die Sonne unter dem Horizont steht (Nachts).
 
 ### Buienradar (`buinradar.py`)
 
-- **Radar grid** for precipitation forecast (30m/1h/2h windows) — works for Germany too (grid-based, not station-based)
-- **Station measurements** (temperature, wind, current precipitation) are Netherlands-only
-- Station data is **ignored when the nearest NL station is >100km away** — temperature and feels_like from a distant station would be irrelevant for the requested location
-- Rain forecast uses 5-minute intervals, converted via `10 ** ((code - 109) / 32)` to mm/h
+- **Radar-Raster** fuer Niederschlagsvorhersage (30 Min/1 Std/2 Std) — funktioniert auch fuer Deutschland (Raster-basiert, nicht stationsbasiert)
+- **Stationsmessungen** (Temperatur, Wind, aktueller Niederschlag) sind auf die Niederlande beschränkt
+- Stationsdaten werden ignoriert, wenn die naechste NL-Station >100km entfernt liegt — Temperatur und gefuehlte Temperatur aus einer fernen Station sind fuer den angeforderten Standort nicht relevant
+- Regen-Niederschlag verwendet 5-Minuten-Intervalle, ueber `10 ** ((code - 109) / 32)` in mm/h umgerechnet
 
-## Merge Strategy
+## Merge-Strategie
 
-After all adapters return, the router (`weather_data.py`) merges the results:
+Nachdem alle Datenanbieter ihre Ergebnisse geliefert haben, fusioniert der Router (`weather_data.py`):
 
-| Fields | Strategy | Rationale |
+| Felder | Strategie | Begründung |
 |---|---|---|
-| Wind speed / gust | `max()` across all adapters | Over-reporting is safer than under-reporting |
-| Precipitation rate + 30m/1h/2h windows | `max()` across all adapters | Missing rain is worse than over-reporting it |
-| Feels-like temperature | Same adapter as temperature, fallback to freshest | Keeps temperature and feels_like consistent |
-| Temperature | Freshest source (newest timestamp first) | Most recent data is most accurate. Buienradar is excluded when station >100km away |
-| UV index | Freshest source | Open-Meteo provides accurate real-time UV; DWD's is a rough estimate |
-| Sunrise / sunset / sun elevation | Freshest source | Only Open-Meteo provides these |
-| Stations | All stations from all adapters that returned data | Shows which sources contributed |
+| Windgeschwindigkeit / Böen | `max()` ueber alle Anbieter |_ueber_berichterstattung ist sicherer als Unterberichterstattung |
+| Niederschlag + 30 Min/1 Std/2 Std Fenster | `max()` ueber alle Anbieter | Verpasster Regen ist schlimmer als_ueber_berichterstattung |
+| Gefuehlte Temperatur | Gleicher Anbieter wie Temperatur, sonst frischeste Quelle | Haeelt Temperatur und gefuehlte Temperatur konsistent |
+| Temperatur | Frischeste Quelle (neuster Zeitstempel zuerst) | Neueste Daten sind am genauesten. Buienradar wird bei Station >100km ausgeschlossen |
+| UV-Index | Frischeste Quelle | Open-Meteo liefert genaue Echtzeit-UV; DWD ist eine grobe Schaeztung |
+| Sonnenauf- / untergang / Sonnenhoehe | Frischeste Quelle | Nur Open-Meteo liefert diese Daten |
+| Stationen | Alle Stationen aller Anbieter mit Daten | Zeigt, welche Quellen mitgewirkt haben |
 
-## Configuration
+## Konfiguration
 
-Create a `.env` file in the project root:
+Erstelle eine `.env`-Datei im Projektstammverzeichnis:
 
 ```env
-# Enable wetterdienst fsspec disk cache (DWD data).
-# true  = cache enabled (~0.3s warm, ~7s cold)
-# false = cache disabled (always fresh from DWD)
+# DWD-Disk-Cache aktivieren (fsspec).
+# true  = Cache aktiviert (~0,3s warm, ~7s kalt)
+# false = Cache deaktiviert (immer frisch vom DWD)
 DWD_CACHE=false
 ```
-
-## Known Issues
-
-- **`fastapi dev` crashes on Windows**: The `rich_toolkit` console in `fastapi_cli` uses the system encoding (cp1252 on German Windows). Station names with non-ASCII characters cause `UnicodeEncodeError`. Use `uvicorn app.main:app --reload` instead.
-- **DWD observation data can be stale**: DWD `recent` period data for small stations can be 12+ hours old. The merge layer prefers Open-Meteo's fresher data for temperature and UV.
-- **DWD MosMix UV index is approximate**: The `* 0.019` factor from global radiation gives a rough estimate. Open-Meteo provides the accurate UV index and takes precedence via the freshness-based merge.
-
-## Windows SSL Configuration
-
-`uv` uses rustls on Windows. `SSL_CERT_FILE` and `NODE_EXTRA_CA_CERTS` pointing to a single corporate cert break TLS chain validation against PyPI.
-
-- `uv.toml` contains `system-certs = true` — uses Windows Certificate Store
-- Do not set `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` as Windows env vars
-- If `uv lock --upgrade` fails with `UnknownIssuer`, unset them:
-  ```powershell
-  $env:SSL_CERT_FILE=""
-  $env:NODE_EXTRA_CA_CERTS=""
-  ```
