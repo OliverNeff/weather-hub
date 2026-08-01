@@ -186,7 +186,9 @@ class TestGetCsvFromZip:
         _zip_cache.clear()
         zip_bytes = self._make_zip_bytes()
 
-        with patch("app.adapter.wetterdienst_dwd._http_get_bytes", return_value=zip_bytes) as mock_get:
+        with patch(
+            "app.adapter.wetterdienst_dwd._http_get_bytes", return_value=zip_bytes
+        ) as mock_get:
             _get_csv_from_zip("12345", "nieder", "precipitation")
 
         mock_get.assert_called_once()
@@ -202,6 +204,7 @@ class TestGetCsvFromZip:
 class TestGetStationsForParam:
     def _clear_station_caches(self):
         from app.adapter.wetterdienst_dwd import _station_cache, _station_cache_time
+
         _station_cache.clear()
         _station_cache_time.clear()
 
@@ -252,7 +255,9 @@ class TestGetStationsForParam:
             "00001 20200101 20260801 150 50.1000 9.1000 Station A  Berlin \n"
         )
 
-        with patch("app.adapter.wetterdienst_dwd._http_get_text", return_value=tsv_text) as mock_get:
+        with patch(
+            "app.adapter.wetterdienst_dwd._http_get_text", return_value=tsv_text
+        ) as mock_get:
             _get_stations_for_param("wind_speed")
             stations = _get_stations_for_param("wind_speed")
 
@@ -322,13 +327,16 @@ class TestGetAllStations:
 class TestFetchParamFromStations:
     def test_fetches_values_from_stations(self):
         """Normal case: fetches values from stations that have data."""
+
         def mock_get_stations(pk):
             return [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A"}]
 
         def mock_fetch(sid, zp, cc, dd):
             return 22.5, FROZEN
 
-        all_stations = [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 10.0}]
+        all_stations = [
+            {"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 10.0}
+        ]
 
         with patch("app.adapter.wetterdienst_dwd._get_stations_for_param", mock_get_stations):
             with patch("app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch):
@@ -342,13 +350,16 @@ class TestFetchParamFromStations:
 
     def test_station_failure_returns_none(self):
         """When a single station fails, it returns None for that station."""
+
         def mock_get_stations(pk):
             return [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A"}]
 
         def mock_fetch(sid, zp, cc, dd):
             raise httpx.HTTPError("connection failed")
 
-        all_stations = [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 10.0}]
+        all_stations = [
+            {"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 10.0}
+        ]
 
         with patch("app.adapter.wetterdienst_dwd._get_stations_for_param", mock_get_stations):
             with patch("app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch):
@@ -359,10 +370,13 @@ class TestFetchParamFromStations:
 
     def test_no_available_stations_returns_empty(self):
         """When no stations have data for this param, returns empty list."""
+
         def mock_get_stations(pk):
             return []
 
-        all_stations = [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 10.0}]
+        all_stations = [
+            {"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 10.0}
+        ]
 
         with patch("app.adapter.wetterdienst_dwd._get_stations_for_param", mock_get_stations):
             results = _fetch_param_from_stations("temperature", all_stations)
@@ -396,6 +410,7 @@ class TestFetchObservation:
 
     def test_successful_fetch_returns_primary_and_stations(self):
         """Full successful flow returns observation data and station list."""
+
         def mock_all_stations():
             return [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 5.0}]
 
@@ -410,8 +425,13 @@ class TestFetchObservation:
 
         with patch("app.adapter.wetterdienst_dwd._get_all_stations", mock_all_stations):
             with patch("app.adapter.wetterdienst_dwd._find_nearest_stations", mock_find_nearest):
-                with patch("app.adapter.wetterdienst_dwd._get_stations_for_param", mock_get_stations_for_param):
-                    with patch("app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station):
+                with patch(
+                    "app.adapter.wetterdienst_dwd._get_stations_for_param",
+                    mock_get_stations_for_param,
+                ):
+                    with patch(
+                        "app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station
+                    ):
                         result = _fetch_observation(50.0, 9.0)
 
         primary = result.get("_primary")
@@ -421,6 +441,7 @@ class TestFetchObservation:
 
     def test_stale_precipitation_discarded(self):
         """Stale precipitation data (>2h old) is discarded."""
+
         def mock_all_stations():
             return [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 5.0}]
 
@@ -438,8 +459,13 @@ class TestFetchObservation:
 
         with patch("app.adapter.wetterdienst_dwd._get_all_stations", mock_all_stations):
             with patch("app.adapter.wetterdienst_dwd._find_nearest_stations", mock_find_nearest):
-                with patch("app.adapter.wetterdienst_dwd._get_stations_for_param", mock_get_stations_for_param):
-                    with patch("app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station):
+                with patch(
+                    "app.adapter.wetterdienst_dwd._get_stations_for_param",
+                    mock_get_stations_for_param,
+                ):
+                    with patch(
+                        "app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station
+                    ):
                         result = _fetch_observation(50.0, 9.0)
 
         primary = result.get("_primary")
@@ -450,6 +476,7 @@ class TestFetchObservation:
 
     def test_no_temp_and_no_wind_returns_empty(self):
         """When neither temperature nor wind is available, returns empty observation."""
+
         def mock_all_stations():
             return [{"id": "00001", "lat": 50.0, "lon": 9.0, "name": "Station A", "distance": 5.0}]
 
@@ -467,8 +494,13 @@ class TestFetchObservation:
 
         with patch("app.adapter.wetterdienst_dwd._get_all_stations", mock_all_stations):
             with patch("app.adapter.wetterdienst_dwd._find_nearest_stations", mock_find_nearest):
-                with patch("app.adapter.wetterdienst_dwd._get_stations_for_param", mock_get_stations_for_param):
-                    with patch("app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station):
+                with patch(
+                    "app.adapter.wetterdienst_dwd._get_stations_for_param",
+                    mock_get_stations_for_param,
+                ):
+                    with patch(
+                        "app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station
+                    ):
                         result = _fetch_observation(50.0, 9.0)
 
         assert result == _empty_observation()
@@ -485,13 +517,15 @@ class TestFetchForecast:
         from app.adapter.wetterdienst_dwd import _mosmix_cache
 
         now = datetime.now(timezone.utc)
-        vals_df = pl.DataFrame({
-            "station_id": ["1"],
-            "parameter": ["precipitation_height_significant_weather_last_1h"],
-            "quantity": ["precipitation_height"],
-            "date": [now],
-            "value": [3.0],
-        })
+        vals_df = pl.DataFrame(
+            {
+                "station_id": ["1"],
+                "parameter": ["precipitation_height_significant_weather_last_1h"],
+                "quantity": ["precipitation_height"],
+                "date": [now],
+                "value": [3.0],
+            }
+        )
         _mosmix_cache["50.00,9.00"] = (now, vals_df)
 
         with patch("app.adapter.wetterdienst_dwd.DwdMosmixRequest") as mock_req:
@@ -569,12 +603,15 @@ class TestProcessForecastDfEdgeCases:
 class TestFetchWetterdienstWeather:
     async def test_empty_observation_and_forecast(self):
         """Both observation and forecast empty returns empty WeatherData."""
-        with patch(
-            "app.adapter.wetterdienst_dwd._fetch_observation",
-            return_value={"_primary": None, "_all": []},
-        ), patch(
-            "app.adapter.wetterdienst_dwd._fetch_forecast",
-            return_value=_empty_forecast(),
+        with (
+            patch(
+                "app.adapter.wetterdienst_dwd._fetch_observation",
+                return_value={"_primary": None, "_all": []},
+            ),
+            patch(
+                "app.adapter.wetterdienst_dwd._fetch_forecast",
+                return_value=_empty_forecast(),
+            ),
         ):
             from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
 
@@ -611,12 +648,15 @@ class TestFetchWetterdienstWeather:
             "uv_index": 5.0,
         }
 
-        with patch(
-            "app.adapter.wetterdienst_dwd._fetch_observation",
-            return_value={"_primary": primary, "_all": all_stations},
-        ), patch(
-            "app.adapter.wetterdienst_dwd._fetch_forecast",
-            return_value=forecast,
+        with (
+            patch(
+                "app.adapter.wetterdienst_dwd._fetch_observation",
+                return_value={"_primary": primary, "_all": all_stations},
+            ),
+            patch(
+                "app.adapter.wetterdienst_dwd._fetch_forecast",
+                return_value=forecast,
+            ),
         ):
             from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
 

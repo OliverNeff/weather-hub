@@ -28,20 +28,24 @@ def _make_buienradar_result(
     rain_content = "\n".join(_rain_line(c) for c in rain_codes) + "\n"
 
     # Build proper JSON string for content field
-    content = json.dumps({
-        "actual": {
-            "stationmeasurements": [{
-                "stationname": "Test Station",
-                "lat": station_lat,
-                "lon": station_lon,
-                "temperature": temperature,
-                "feeltemperature": feels_like,
-                "windspeed": windspeed,
-                "windgusts": windgusts,
-                "precipitation": precipitation,
-            }]
+    content = json.dumps(
+        {
+            "actual": {
+                "stationmeasurements": [
+                    {
+                        "stationname": "Test Station",
+                        "lat": station_lat,
+                        "lon": station_lon,
+                        "temperature": temperature,
+                        "feeltemperature": feels_like,
+                        "windspeed": windspeed,
+                        "windgusts": windgusts,
+                        "precipitation": precipitation,
+                    }
+                ]
+            }
         }
-    })
+    )
 
     return {
         "success": True,
