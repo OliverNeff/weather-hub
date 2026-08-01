@@ -77,8 +77,6 @@ async def fetch_buienradar_weather(
         precipitation_amount_next_2h = sum(data_2h)
         precipitation_intensity_next_2h = max(data_2h)
 
-    precip_mm = station.get("precipitation")
-
     # Buienradar has NL-only stations. For DE coords the nearest station can be
     # 200km+ away — its temperature/feels_like are irrelevant. Only rain radar
     # is useful across the border.
@@ -87,6 +85,14 @@ async def fetch_buienradar_weather(
         + (station.get("lon", 0) - longitude) ** 2
     )
     station_too_far = station_dist_deg > _MAX_STATION_DEG
+
+    # Use station precipitation if available. For DE coords the NL station is too
+    # far away, but the radar grid still works cross-border — if the first radar
+    # interval (5-min resolution) shows rain, that's our best current reading.
+    # to_mmh() already returns mm/h, so raindata[0] is the intensity directly.
+    precip_mm = station.get("precipitation") if station_too_far is False else None
+    if precip_mm is None and raindata and raindata[0] > 0:
+        precip_mm = round(raindata[0], 1)
 
     weather_data = WeatherData(
         time=datetime.now(timezone.utc),
