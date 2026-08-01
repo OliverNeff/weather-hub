@@ -228,21 +228,29 @@ def _parse_minutely_precipitation(minutely_15: dict, hourly: dict, now: datetime
     for label, duration in windows.items():
         window_end = now + duration
         window_vals = []
+        has_data = False
         for i, ts in enumerate(times):
             dt = _parse_iso(ts)
             if dt is None:
                 continue
             if dt >= now and dt < window_end:
+                has_data = True
                 val = values[i]
                 if val is not None and val > 0:
                     # Convert mm/15min → mm/h for intensity
                     window_vals.append(val * 4)
 
-        if window_vals:
-            total = sum(window_vals) / len(window_vals)  # average intensity in mm/h
-            result[f"precipitation_amount_next_{label}"] = round(total, 2)
-            result[f"precipitation_intensity_next_{label}"] = round(total, 2)
-            result[f"precipitation_next_{label}"] = True
+        if has_data:
+            if window_vals:
+                total = sum(window_vals) / len(window_vals)  # average intensity in mm/h
+                result[f"precipitation_amount_next_{label}"] = round(total, 2)
+                result[f"precipitation_intensity_next_{label}"] = round(total, 2)
+                result[f"precipitation_next_{label}"] = True
+            else:
+                # Data available but all values are 0 — no rain expected
+                result[f"precipitation_next_{label}"] = False
+                result[f"precipitation_amount_next_{label}"] = 0.0
+                result[f"precipitation_intensity_next_{label}"] = 0.0
 
     return result
 
@@ -275,19 +283,27 @@ def _parse_hourly_precipitation(hourly: dict, now: datetime):
     for label, duration in windows.items():
         window_end = now + duration
         values = []
+        has_data = False
         for i, ts in enumerate(times):
             dt = _parse_iso(ts)
             if dt is None:
                 continue
             if dt >= now and dt < window_end:
+                has_data = True
                 val = precip[i]
                 if val is not None and val > 0:
                     values.append(val)
 
-        if values:
-            mean = sum(values) / len(values)
-            result[f"precipitation_amount_next_{label}"] = round(mean, 2)
-            result[f"precipitation_intensity_next_{label}"] = round(mean, 2)
-            result[f"precipitation_next_{label}"] = True
+        if has_data:
+            if values:
+                mean = sum(values) / len(values)
+                result[f"precipitation_amount_next_{label}"] = round(mean, 2)
+                result[f"precipitation_intensity_next_{label}"] = round(mean, 2)
+                result[f"precipitation_next_{label}"] = True
+            else:
+                # Data available but all values are 0 — no rain expected
+                result[f"precipitation_next_{label}"] = False
+                result[f"precipitation_amount_next_{label}"] = 0.0
+                result[f"precipitation_intensity_next_{label}"] = 0.0
 
     return result

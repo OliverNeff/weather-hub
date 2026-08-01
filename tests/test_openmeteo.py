@@ -242,12 +242,14 @@ class TestParseMinutelyPrecipitation:
         assert result["precipitation_next_30m"] is True
         assert result["precipitation_amount_next_30m"] is not None
 
-    def test_no_rain_returns_none(self):
+    def test_no_rain_returns_false_not_none(self):
         now = self._make_now()
         data = _make_minutely_15(now, [0.0, 0.0, 0.0, 0.0])
         result = _parse_minutely_precipitation(data, {}, now)
-        for key in result:
-            assert result[key] is None
+        # Data exists but shows no rain — return False/0.0, not None
+        for window in ("30m", "1h", "2h"):
+            assert result[f"precipitation_next_{window}"] is False
+            assert result[f"precipitation_amount_next_{window}"] == 0.0
 
     def test_all_windows_populated(self):
         now = self._make_now()
@@ -373,8 +375,13 @@ class TestParseHourlyPrecipitation:
             "precipitation": [0.0, 0.0],
         }
         result = _parse_hourly_precipitation(data, now)
-        for key in result:
-            assert result[key] is None
+        # Data exists but shows no rain — return False/0.0, not None
+        for window in ("30m", "1h", "2h"):
+            if result[f"precipitation_next_{window}"] is not None:
+                assert result[f"precipitation_next_{window}"] is False
+                assert result[f"precipitation_amount_next_{window}"] == 0.0
+        # 30m window has no hourly data (first data point at 1h)
+        assert result["precipitation_next_30m"] is None
 
     def test_two_hours_rain(self):
         now = self._make_now()
@@ -414,17 +421,19 @@ class TestParseHourlyPrecipitation:
 
     def test_none_values_ignored(self):
         now = self._make_now()
-        # now+30min in 1h window (value None, skipped), now+90min in 2h window only
+        # now+30min in 1h window (value None, skipped), now+45min in 1h and 2h windows
         data = {
             "time": [
                 (now + timedelta(minutes=30)).isoformat(),
-                (now + timedelta(minutes=90)).isoformat(),
+                (now + timedelta(minutes=45)).isoformat(),
             ],
             "precipitation": [None, 2.0],
         }
         result = _parse_hourly_precipitation(data, now)
-        assert result["precipitation_next_1h"] is None  # None skipped, no data in 1h window
+        # now+30min has None (skipped), now+45min has 2.0 in both 1h and 2h windows
+        assert result["precipitation_next_1h"] is True
         assert result["precipitation_next_2h"] is True
+        assert result["precipitation_amount_next_1h"] == 2.0
         assert result["precipitation_amount_next_2h"] == 2.0
 
     def test_boundary_exclusive(self):
