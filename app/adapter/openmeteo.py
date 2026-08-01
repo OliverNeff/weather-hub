@@ -133,7 +133,9 @@ def _parse_iso(s: str | None) -> datetime | None:
         return None
 
 
-def _parse_sun(daily: dict[str, Any], lat: float, lon: float) -> tuple[datetime | None, datetime | None, float | None]:
+def _parse_sun(
+    daily: dict[str, Any], lat: float, lon: float
+) -> tuple[datetime | None, datetime | None, float | None]:
     sunrise_dt = None
     sunset_dt = None
 

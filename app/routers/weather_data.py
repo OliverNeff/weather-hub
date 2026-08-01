@@ -1,7 +1,8 @@
 import asyncio
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence
+from typing import Any
 
 from fastapi import APIRouter
 
@@ -9,7 +10,6 @@ from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
 from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
 from app.models.weather_data import WeatherData
-from app.models.weather_station import WeatherStation
 
 logger = logging.getLogger(__name__)
 

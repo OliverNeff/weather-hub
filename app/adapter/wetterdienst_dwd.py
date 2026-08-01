@@ -9,7 +9,8 @@ import re
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Pattern, cast
+from re import Pattern
+from typing import Any, cast
 
 import httpx
 import polars as pl
@@ -406,7 +407,9 @@ def _fetch_param_from_stations(
         if not stations_to_try:
             return results
 
-        def _try_one(st: dict[str, Any]) -> tuple[str, float | None, datetime | None, dict[str, Any] | None]:
+        def _try_one(
+            st: dict[str, Any],
+        ) -> tuple[str, float | None, datetime | None, dict[str, Any] | None]:
             try:
                 val, dt = _fetch_station_value(
                     st["id"],
@@ -677,7 +680,11 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
     # UV-Index aus Globalstrahlung (J/m^2)
     if len(rad) > 0:
         mean_rad = rad["value"].mean()
-        if mean_rad is not None and isinstance(mean_rad, (int, float)) and not math.isnan(float(mean_rad)):
+        if (
+            mean_rad is not None
+            and isinstance(mean_rad, (int, float))
+            and not math.isnan(float(mean_rad))
+        ):
             uv_approx = round(mean_rad * 0.019, 1)
             forecast["uv_index"] = min(max(uv_approx, 0), 16)
 
