@@ -1,6 +1,7 @@
 import json
 import math
 from datetime import datetime, timezone
+from typing import Any
 
 from buienradar.buienradar import get_data
 from buienradar.constants import CONTENT, RAINCONTENT, SUCCESS
@@ -131,7 +132,7 @@ def _parse_raindata(raw: str | None) -> list[float]:
     return [to_mmh(int(line.split("|")[0])) for line in raw.strip().split("\n") if "|" in line]
 
 
-def _nearest_station(data: dict, latitude: float, longitude: float) -> dict:
+def _nearest_station(data: dict[str, Any], latitude: float, longitude: float) -> dict[str, Any]:
     """
     Gibt die Messstation zurück, die den gegebenen Koordinaten am
     nächsten liegt.
