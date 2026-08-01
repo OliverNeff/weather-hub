@@ -79,7 +79,10 @@ _NUM_STATIONS = int(os.environ.get("DWD_STATIONS", "3"))
 # ---------------------------------------------------------------------------
 # Wetterdienst settings (for MosMix forecast only)
 # ---------------------------------------------------------------------------
-_SETTINGS = Settings(_env_file=None, cache_disable=True)
+_SETTINGS = Settings(
+    _env_file=None,
+    cache_disable=os.environ.get("DWD_CACHE", "true").lower() != "true",
+)
 
 
 # ---------------------------------------------------------------------------

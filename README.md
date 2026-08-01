@@ -147,7 +147,7 @@ Erstelle eine `.env`-Datei im Projektstammverzeichnis:
 
 ```env
 # DWD-Disk-Cache aktivieren (fsspec).
-# true  = Cache aktiviert (~0,3s warm, ~7s kalt)
+# true  = Cache aktiviert (~0,3s warm, ~7s kalt) — Standard
 # false = Cache deaktiviert (immer frisch vom DWD)
-DWD_CACHE=false
+DWD_CACHE=true
 ```
