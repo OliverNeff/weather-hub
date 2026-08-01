@@ -1,15 +1,17 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any, Sequence
 
 from fastapi import APIRouter
 
 from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
 from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
+from app.models.weather_data import WeatherData
+from app.models.weather_station import WeatherStation
 
 logger = logging.getLogger(__name__)
-from app.models.weather_data import WeatherData
 
 router = APIRouter(prefix="/weather/data", tags=["weather-data"])
 
@@ -71,7 +73,7 @@ _CONSERVATIVE_FIELDS = {
 }
 
 
-def _pick_first(data: tuple, field: str) -> tuple:
+def _pick_first(data: Sequence[WeatherData], field: str) -> tuple[Any, Any]:
     """Return the first non-None value for *field* and its adapter."""
     for wd in data:
         val = getattr(wd, field)
@@ -80,9 +82,9 @@ def _pick_first(data: tuple, field: str) -> tuple:
     return None, None
 
 
-def _pick_max(data: tuple, field: str):
+def _pick_max(data: Sequence[WeatherData], field: str) -> float | None:
     """Return the max non-None value for *field*."""
-    best = None
+    best: float | None = None
     for wd in data:
         val = getattr(wd, field)
         if val is not None and (best is None or val > best):
@@ -90,11 +92,11 @@ def _pick_max(data: tuple, field: str):
     return best
 
 
-def _sorted_by_freshness(data: tuple) -> list:
+def _sorted_by_freshness(data: Sequence[WeatherData]) -> list[WeatherData]:
     """Sort adapters newest first. Adapters without a time go to the end."""
     now = datetime.now(timezone.utc)
 
-    def _sort_key(wd):
+    def _sort_key(wd: WeatherData) -> datetime:
         if not wd.stations:
             return now - timedelta(days=1)
         t = wd.stations[0].time
@@ -105,10 +107,11 @@ def _sorted_by_freshness(data: tuple) -> list:
     return sorted(data, key=_sort_key, reverse=True)
 
 
-async def _safe_fetch(func, lat, lon):
+async def _safe_fetch(func: Any, lat: float, lon: float) -> WeatherData:
     """Call an adapter; on failure return an empty WeatherData."""
     try:
-        return await func(latitude=lat, longitude=lon)
+        result: WeatherData = await func(latitude=lat, longitude=lon)
+        return result
     except Exception as e:
         logger.error("adapter %s failed: %s", func.__name__, e, exc_info=True)
         return WeatherData()

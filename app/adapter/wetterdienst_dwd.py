@@ -9,7 +9,7 @@ import re
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Pattern, cast
 
 import httpx
 import polars as pl
@@ -33,7 +33,7 @@ DWD_BASE = "https://opendata.dwd.de/climate_environment/CDC/observations_germany
 #   zip_prefix: pattern in directory listing (10minutenwerte_{zip_prefix}_{station_id}_akt.zip)
 #   csv_value_column: column name in the extracted CSV
 # ---------------------------------------------------------------------------
-_DATASETS = {
+_DATASETS: dict[str, dict[str, Any]] = {
     # air_temperature has no station TSV — stations discovered via directory listing
     "temperature": {
         "dir": "air_temperature",
@@ -101,7 +101,7 @@ _ZIP_CACHE_TTL = timedelta(minutes=8)
 # Lightweight in-memory cache for station lists (TTL 5min)
 # Avoids re-fetching directory listings / TSVs on every request.
 # ---------------------------------------------------------------------------
-_station_cache: dict[str, list[dict[str, Any]]] = {}
+_station_cache: dict[str, Any] = {}
 _STATION_CACHE_TTL = timedelta(minutes=5)
 _station_cache_time: dict[str, datetime] = {}
 
@@ -172,7 +172,7 @@ def _parse_station_tsv(text: str) -> list[dict[str, Any]]:
     return stations
 
 
-def _parse_directory_listing(html: str, pattern: re.Pattern) -> list[str]:
+def _parse_directory_listing(html: str, pattern: Pattern[str]) -> list[str]:
     """Extract station IDs from DWD directory listing HTML."""
     return list(set(pattern.findall(html)))
 
@@ -188,7 +188,8 @@ def _get_stations_for_param(param_key: str) -> list[dict[str, Any]]:
     if param_key in _station_cache:
         age = now - _station_cache_time.get(param_key, now)
         if age < _STATION_CACHE_TTL:
-            return _station_cache[param_key]
+            result = _station_cache[param_key]
+        return cast(list[dict[str, Any]], result)
 
     ds = _DATASETS[param_key]
 
@@ -204,7 +205,7 @@ def _get_stations_for_param(param_key: str) -> list[dict[str, Any]]:
         # No TSV — get IDs from directory listing, look up metadata from
         # the precipitation TSV (best coverage).
         html = _http_get_text(f"{DWD_BASE}/{ds['dir']}/recent/")
-        station_ids = _parse_directory_listing(html, ds["zip_pattern"])
+        station_ids = _parse_directory_listing(html, cast(Pattern[str], ds["zip_pattern"]))
 
         # Build a lookup from precipitation TSV (most stations)
         cache_key = "precipitation_lookup"
@@ -390,13 +391,13 @@ def _get_all_stations() -> list[dict[str, Any]]:
 def _fetch_param_from_stations(
     param_key: str,
     stations: list[dict[str, Any]],
-) -> list[tuple[str, float | None, datetime | None, dict | None]]:
+) -> list[tuple[str, float | None, datetime | None, dict[str, Any] | None]]:
     """
     Fetch a single parameter from the given stations.
     Returns a list of (param_key, value, timestamp, station_info) tuples.
     """
     ds = _DATASETS[param_key]
-    results: list[tuple[str, float | None, datetime | None, dict | None]] = []
+    results: list[tuple[str, float | None, datetime | None, dict[str, Any] | None]] = []
     try:
         # Only try stations that have data for this parameter
         available = _get_stations_for_param(param_key)
@@ -406,7 +407,7 @@ def _fetch_param_from_stations(
         if not stations_to_try:
             return results
 
-        def _try_one(st):
+        def _try_one(st: dict[str, Any]) -> tuple[str, float | None, datetime | None, dict[str, Any] | None]:
             try:
                 val, dt = _fetch_station_value(
                     st["id"],
@@ -482,8 +483,8 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
     # until we have enough stations with data or run out of candidates.
     rounds = [candidates[i : i + _NUM_STATIONS] for i in range(0, len(candidates), _NUM_STATIONS)]
 
-    all_results: list[tuple[str, float | None, datetime | None, dict | None]] = []
-    stations_seen: dict[str, dict] = {}
+    all_results: list[tuple[str, float | None, datetime | None, dict[str, Any] | None]] = []
+    stations_seen: dict[str, dict[str, Any]] = {}
     stale_threshold = datetime.now(timezone.utc) - timedelta(hours=2)
 
     round_idx = 0
@@ -560,8 +561,10 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             continue
         if primary.get(pk) is None or dt is None or dt > primary.get("time", dt):
             primary[pk] = val
-        if dt and (primary.get("time") is None or dt > primary.get("time")):
-            primary["time"] = dt
+        if dt is not None:
+            existing_time = primary.get("time")
+            if existing_time is None or dt > existing_time:
+                primary["time"] = dt
 
     # Log which stations contributed data
     if stations_seen:
@@ -667,7 +670,7 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
         )
         if len(window) > 0:
             mean = window["value"].mean()
-            if mean is not None and not math.isnan(mean):
+            if mean is not None and isinstance(mean, (int, float)) and not math.isnan(float(mean)):
                 val = round(mean, 2)
                 forecast[f"precip_{label}"] = val
                 forecast[f"intensity_{label}"] = val
@@ -675,7 +678,7 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
     # UV-Index aus Globalstrahlung (J/m^2)
     if len(rad) > 0:
         mean_rad = rad["value"].mean()
-        if mean_rad is not None and not math.isnan(mean_rad):
+        if mean_rad is not None and isinstance(mean_rad, (int, float)) and not math.isnan(float(mean_rad)):
             uv_approx = round(mean_rad * 0.019, 1)
             forecast["uv_index"] = min(max(uv_approx, 0), 16)
 
@@ -704,10 +707,10 @@ async def fetch_wetterdienst_weather(
     all_stations = obs.get("_all", [])
 
     def _precip_bool(key: str) -> bool | None:
-        val = fc[key]
+        val = fc.get(key)
         if val is None:
             return None
-        return val > 0
+        return float(val) > 0
 
     precip_val = primary["precipitation"]
     # DWD precipitation_height is mm per 10 min; convert to mm/h.

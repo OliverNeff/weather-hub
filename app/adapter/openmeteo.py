@@ -1,5 +1,6 @@
 import math
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 
@@ -100,8 +101,7 @@ def _empty(lat: float, lon: float) -> WeatherData:
 # ---------------------------------------------------------------------------
 
 
-def _sf(d: dict, key: str):
-    """Extract a single float value, None if missing or NaN."""
+def _sf(d: dict[str, Any], key: str) -> float | None:
     val = d.get(key)
     if val is None:
         return None
@@ -109,22 +109,20 @@ def _sf(d: dict, key: str):
     return None if math.isnan(f) else round(f, 1)
 
 
-def _si(d: dict, key: str):
-    """Extract a single int value, None if missing."""
+def _si(d: dict[str, Any], key: str) -> int | None:
     val = d.get(key)
     if val is None:
         return None
     return int(val)
 
 
-def _kmh(kmh):
-    """Convert km/h to m/s."""
+def _kmh(kmh: float | None) -> float | None:
     if kmh is None:
         return None
     return round(kmh * _KMH_TO_MS, 1)
 
 
-def _parse_iso(s: str | None):
+def _parse_iso(s: str | None) -> datetime | None:
     if not s:
         return None
     try:
@@ -135,7 +133,7 @@ def _parse_iso(s: str | None):
         return None
 
 
-def _parse_sun(daily: dict, lat: float, lon: float):
+def _parse_sun(daily: dict[str, Any], lat: float, lon: float) -> tuple[datetime | None, datetime | None, float | None]:
     sunrise_dt = None
     sunset_dt = None
 
@@ -167,7 +165,7 @@ def _noaa_elevation(lat: float, lon: float, now: datetime) -> float | None:
     return round(elevation, 1)
 
 
-def _current_precip_from_minutely(minutely_15: dict, now: datetime) -> float | None:
+def _current_precip_from_minutely(minutely_15: dict[str, Any], now: datetime) -> float | None:
     """Compute current precipitation intensity (mm/h) from minutely_15 data.
 
     Takes the nearest 15-minute interval in the future (within 30min) and converts
@@ -178,8 +176,8 @@ def _current_precip_from_minutely(minutely_15: dict, now: datetime) -> float | N
     if not times or not values:
         return None
 
-    best_val = None
-    best_dt = None
+    best_val: float | None = None
+    best_dt: datetime | None = None
     for i, ts in enumerate(times):
         dt = _parse_iso(ts)
         if dt is None:
@@ -199,12 +197,8 @@ def _current_precip_from_minutely(minutely_15: dict, now: datetime) -> float | N
     return None
 
 
-def _parse_minutely_precipitation(minutely_15: dict, hourly: dict, now: datetime):
-    """Build 30m / 1h / 2h forecast fields from minutely_15 precipitation data.
-
-    Falls back to hourly data if minutely_15 is not available.
-    """
-    result = {
+def _build_precip_result() -> dict[str, bool | float | None]:
+    return {
         "precipitation_next_30m": None,
         "precipitation_amount_next_30m": None,
         "precipitation_intensity_next_30m": None,
@@ -215,6 +209,16 @@ def _parse_minutely_precipitation(minutely_15: dict, hourly: dict, now: datetime
         "precipitation_amount_next_2h": None,
         "precipitation_intensity_next_2h": None,
     }
+
+
+def _parse_minutely_precipitation(
+    minutely_15: dict[str, Any], hourly: dict[str, Any], now: datetime
+) -> dict[str, bool | float | None]:
+    """Build 30m / 1h / 2h forecast fields from minutely_15 precipitation data.
+
+    Falls back to hourly data if minutely_15 is not available.
+    """
+    result = _build_precip_result()
 
     times = minutely_15.get("time", [])
     values = minutely_15.get("precipitation", [])
@@ -231,7 +235,7 @@ def _parse_minutely_precipitation(minutely_15: dict, hourly: dict, now: datetime
 
     for label, duration in windows.items():
         window_end = now + duration
-        window_vals = []
+        window_vals: list[float] = []
         has_data = False
         for i, ts in enumerate(times):
             dt = _parse_iso(ts)
@@ -259,19 +263,11 @@ def _parse_minutely_precipitation(minutely_15: dict, hourly: dict, now: datetime
     return result
 
 
-def _parse_hourly_precipitation(hourly: dict, now: datetime):
+def _parse_hourly_precipitation(
+    hourly: dict[str, Any], now: datetime
+) -> dict[str, bool | float | None]:
     """Build 30m / 1h / 2h forecast fields from hourly precipitation data."""
-    result = {
-        "precipitation_next_30m": None,
-        "precipitation_amount_next_30m": None,
-        "precipitation_intensity_next_30m": None,
-        "precipitation_next_1h": None,
-        "precipitation_amount_next_1h": None,
-        "precipitation_intensity_next_1h": None,
-        "precipitation_next_2h": None,
-        "precipitation_amount_next_2h": None,
-        "precipitation_intensity_next_2h": None,
-    }
+    result = _build_precip_result()
 
     times = hourly.get("time", [])
     precip = hourly.get("precipitation", [])
@@ -286,7 +282,7 @@ def _parse_hourly_precipitation(hourly: dict, now: datetime):
 
     for label, duration in windows.items():
         window_end = now + duration
-        values = []
+        values: list[float] = []
         has_data = False
         for i, ts in enumerate(times):
             dt = _parse_iso(ts)
