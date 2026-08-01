@@ -81,9 +81,12 @@ class TestFetchOpenMeteoWeather:
         """Normal fetch returns mapped weather data."""
         resp = _make_openmeteo_response(FROZEN)
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -99,9 +102,12 @@ class TestFetchOpenMeteoWeather:
 
     async def test_http_error_returns_empty(self):
         """HTTP error returns empty WeatherData."""
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(side_effect=httpx.HTTPError("connection failed")),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(side_effect=httpx.HTTPError("connection failed")),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -116,9 +122,12 @@ class TestFetchOpenMeteoWeather:
             "Not Found", request=MagicMock(), response=MagicMock(status_code=404)
         )
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=mock_resp),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=mock_resp),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -128,9 +137,12 @@ class TestFetchOpenMeteoWeather:
         """NaN temperature values become None."""
         resp = _make_openmeteo_response(FROZEN, temperature=float("nan"))
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -144,9 +156,12 @@ class TestFetchOpenMeteoWeather:
             include_hourly=True,
         )
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -162,9 +177,12 @@ class TestFetchOpenMeteoWeather:
             minutely_precip_values=precip_vals,
         )
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -174,9 +192,12 @@ class TestFetchOpenMeteoWeather:
         """Sunrise and sunset are parsed from daily data."""
         resp = _make_openmeteo_response(FROZEN, include_sunrise_sunset=True)
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -189,9 +210,12 @@ class TestFetchOpenMeteoWeather:
         resp = _make_openmeteo_response(FROZEN)
         resp["daily"] = {"sunrise": [], "sunset": []}
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -202,9 +226,12 @@ class TestFetchOpenMeteoWeather:
         """Station coordinates match the requested coordinates."""
         resp = _make_openmeteo_response(FROZEN)
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(49.5, 8.7)
 
@@ -217,9 +244,12 @@ class TestFetchOpenMeteoWeather:
         resp = _make_openmeteo_response(FROZEN)
         resp["current"].pop("uv_index")
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
@@ -232,9 +262,12 @@ class TestFetchOpenMeteoWeather:
         resp = _make_openmeteo_response(FROZEN, precip=2.5)
         resp["minutely_15"] = {"time": past_times, "precipitation": [0.0] * 48}
 
-        with freeze_time(FROZEN), patch(
-            "app.adapter.openmeteo._session.get",
-            new=AsyncMock(return_value=_mock_response(resp)),
+        with (
+            freeze_time(FROZEN),
+            patch(
+                "app.adapter.openmeteo._session.get",
+                new=AsyncMock(return_value=_mock_response(resp)),
+            ),
         ):
             wd = await fetch_openmeteo_weather(50.0, 9.0)
 
