@@ -48,10 +48,39 @@ Liefert aktuelle Wetterbedingungen sowie Niederschlagsvorhersage fuer die naechs
 | `sun_elevation` | `float \| null` | Sonnenhoehe in Grad (negativ, wenn unter dem Horizont) |
 | `sunrise` | `datetime \| null` | Sonnenaufgang heute (UTC) |
 | `sunset` | `datetime \| null` | Sonnenuntergang heute (UTC) |
+| **Wetter-Status** | | |
+| `status` | `str \| null` | Home Assistant-kompatibler Wetterstatus (siehe unten) |
+| `weather_code` | `int \| null` | WMO-Wettercode (0–96) aus Open-Meteo |
+| `cloud_cover` | `int \| null` | Bewölkungsgrad in % (0–100) aus Open-Meteo |
 | **Stationen** | | |
 | `stations` | `list[WeatherStation]` | Alle beteiligten Wetterstationen (siehe unten) |
 
 Alle Felder sind optional — `null` bedeutet, dass der Anbieter keine Daten fuer dieses Feld lieferte.
+
+### Home Assistant Status
+
+Das `status`-Feld mappt auf die 14 vordefinierten Werte der Home Assistant Weather Integration:
+
+| Status | Bedingung |
+|---|---|
+| `sunny` | Wettercode 0–1 tagsueber (Sonne über Horizont) |
+| `clear-night` | Wettercode 0–1 nachts (Sonne unter Horizont) |
+| `partlycloudy` | Wettercode 2 oder Bewoelkung 11–50 % |
+| `cloudy` | Wettercode 3–44 oder Bewoelkung >50 % |
+| `fog` | Wettercode 45, 48 |
+| `rainy` | Messbarer Niederschlag >0 mm/h oder Wettercode 51–65, 80–82 |
+| `pouring` | Niederschlagsintensitaet >5 mm/h |
+| `snowy` | Wettercode 71, 73, 75, 77 (temp >2 °C), 85 |
+| `snowy-rainy` | Wettercode 66, 67, 86 (Gefrierender Regen) |
+| `hail` | Wettercode 77 bei Temperatur ≤2 °C |
+| `lightning` | Wettercode 95 (Gewitter ohne regen) |
+| `lightning-rainy` | Wettercode 96 (Gewitter mit regen) |
+| `windy` | Windgeschwindigkeit ≥10 m/s |
+| `windy-variant` | Windgeschwindigkeit ≥15 m/s |
+
+Die Berechnung nutzt Daten aller drei Anbieter: WMO-Codes aus Open-Meteo für nicht-messbare Bedingungen (Nebel, Schnee, Gewitter), gemergte Maxwerte fuer Wind und Niederschlag (alle Adapter), und Sonnenhoehe fuer Tag/Nacht-Erkennung.
+
+Bei Wettercode 3–44 oder Bewoelkung >50 % wird `cloudy` gemeldet. Wenn der gemessene Niederschlag 0 ist, aber der Wettercode Regen anzeigt (z. B. 61, 63, 64), uebernimmt der Wettercode — er spiegelt die aktuellsten Modell-Daten wider, die noch nicht von Stationsmessungen erfasst sind.
 
 ### Stations-Objekt
 
