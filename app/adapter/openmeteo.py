@@ -29,6 +29,7 @@ async def fetch_openmeteo_weather(
                 "latitude": latitude,
                 "longitude": longitude,
                 "current": "temperature_2m,apparent_temperature,wind_speed_10m,wind_gusts_10m,precipitation,uv_index",
+                "minutely_15": "precipitation",
                 "hourly": "precipitation,uv_index",
                 "daily": "sunrise,sunset",
                 "timezone": "UTC",
@@ -41,16 +42,22 @@ async def fetch_openmeteo_weather(
         return _empty(latitude, longitude)
 
     current = data.get("current", {})
+    minutely_15 = data.get("minutely_15", {})
     hourly = data.get("hourly", {})
     daily = data.get("daily", {})
 
     sunrise_dt, sunset_dt, sun_elevation = _parse_sun(daily, latitude, longitude)
 
     now = datetime.now(timezone.utc)
-    forecast = _parse_hourly_precipitation(hourly, now)
+    forecast = _parse_minutely_precipitation(minutely_15, hourly, now)
     weather_time = _parse_iso(current.get("time"))
 
-    precip = _sf(current, "precipitation")
+    # Compute current precipitation intensity from minutely_15 data (mm/15min → mm/h).
+    # Falls back to current.precipitation (hourly sum, less granular).
+    precip = _current_precip_from_minutely(minutely_15, now)
+    if precip is None:
+        precip = _sf(current, "precipitation")
+
     weather_data = WeatherData(
         temperature=_sf(current, "temperature_2m"),
         feels_like=_sf(current, "apparent_temperature"),
@@ -144,6 +151,90 @@ def _noaa_elevation(lat: float, lon: float, now: datetime) -> float | None:
     elevation = math.degrees(math.asin(sin_el))
 
     return round(elevation, 1)
+
+
+def _current_precip_from_minutely(minutely_15: dict, now: datetime) -> float | None:
+    """Compute current precipitation intensity (mm/h) from minutely_15 data.
+
+    Takes the nearest 15-minute interval in the future (within 30min) and converts
+    mm/15min → mm/h (multiply by 4). Returns None if no data or value is 0.
+    """
+    times = minutely_15.get("time", [])
+    values = minutely_15.get("precipitation", [])
+    if not times or not values:
+        return None
+
+    best_val = None
+    best_dt = None
+    for i, ts in enumerate(times):
+        dt = _parse_iso(ts)
+        if dt is None:
+            continue
+        val = values[i]
+        if val is None:
+            continue
+        # Find the nearest future interval within 30 minutes
+        diff = (dt - now).total_seconds()
+        if 0 <= diff <= 1800:
+            if best_dt is None or diff < (best_dt - now).total_seconds():
+                best_val = val
+                best_dt = dt
+
+    if best_val is not None and best_val > 0:
+        return round(best_val * 4, 1)  # mm per 15min → mm/h
+    return None
+
+
+def _parse_minutely_precipitation(minutely_15: dict, hourly: dict, now: datetime):
+    """Build 30m / 1h / 2h forecast fields from minutely_15 precipitation data.
+
+    Falls back to hourly data if minutely_15 is not available.
+    """
+    result = {
+        "precipitation_next_30m": None,
+        "precipitation_amount_next_30m": None,
+        "precipitation_intensity_next_30m": None,
+        "precipitation_next_1h": None,
+        "precipitation_amount_next_1h": None,
+        "precipitation_intensity_next_1h": None,
+        "precipitation_next_2h": None,
+        "precipitation_amount_next_2h": None,
+        "precipitation_intensity_next_2h": None,
+    }
+
+    times = minutely_15.get("time", [])
+    values = minutely_15.get("precipitation", [])
+
+    # Fallback to hourly if minutely_15 not available
+    if not times or not values:
+        return _parse_hourly_precipitation(hourly, now)
+
+    windows = {
+        "30m": timedelta(minutes=30),
+        "1h": timedelta(hours=1),
+        "2h": timedelta(hours=2),
+    }
+
+    for label, duration in windows.items():
+        window_end = now + duration
+        window_vals = []
+        for i, ts in enumerate(times):
+            dt = _parse_iso(ts)
+            if dt is None:
+                continue
+            if dt >= now and dt < window_end:
+                val = values[i]
+                if val is not None and val > 0:
+                    # Convert mm/15min → mm/h for intensity
+                    window_vals.append(val * 4)
+
+        if window_vals:
+            total = sum(window_vals) / len(window_vals)  # average intensity in mm/h
+            result[f"precipitation_amount_next_{label}"] = round(total, 2)
+            result[f"precipitation_intensity_next_{label}"] = round(total, 2)
+            result[f"precipitation_next_{label}"] = True
+
+    return result
 
 
 def _parse_hourly_precipitation(hourly: dict, now: datetime):
