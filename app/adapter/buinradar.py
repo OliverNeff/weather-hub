@@ -31,7 +31,7 @@ async def fetch_buienradar_weather(
     data = json.loads(result[CONTENT])
 
     # Wir nehmen die Station, die den Koordinaten am nächsten kommt
-    station = __nearest_station(data, latitude, longitude)
+    station = _nearest_station(data, latitude, longitude)
     weather_station = WeatherStation(
         source="buienradar",
         name=station.get("stationname"),
@@ -41,7 +41,7 @@ async def fetch_buienradar_weather(
     )
     # --- Regenvorhersage (5-Minuten-Raster) ---
     raw_raindata = result.get(RAINCONTENT, "")
-    raindata = __parse_raindata(raw_raindata)
+    raindata = _parse_raindata(raw_raindata)
 
     if not raindata:
         precipitation_next_30m = None
@@ -126,7 +126,7 @@ async def fetch_buienradar_weather(
     weather_data.stations.append(weather_station)
     return weather_data
 
-def __parse_raindata(raw: str) -> list[float]:
+def _parse_raindata(raw: str) -> list[float]:
     if not raw:
         return []
 
@@ -139,7 +139,7 @@ def __parse_raindata(raw: str) -> list[float]:
         if "|" in line
     ]
 
-def __nearest_station(
+def _nearest_station(
         data: dict, latitude: float, longitude: float
 ) -> dict:
     """
