@@ -28,7 +28,7 @@ async def fetch_openmeteo_weather(
             params={
                 "latitude": latitude,
                 "longitude": longitude,
-                "current": "temperature_2m,apparent_temperature,wind_speed_10m,wind_gusts_10m,precipitation,uv_index",
+                "current": "temperature_2m,apparent_temperature,wind_speed_10m,wind_gusts_10m,precipitation,uv_index,weather_code,cloud_cover",
                 "minutely_15": "precipitation",
                 "hourly": "precipitation,uv_index",
                 "daily": "sunrise,sunset",
@@ -68,6 +68,8 @@ async def fetch_openmeteo_weather(
         sun_elevation=sun_elevation,
         sunrise=sunrise_dt,
         sunset=sunset_dt,
+        weather_code=_si(current, "weather_code"),
+        cloud_cover=_si(current, "cloud_cover"),
         **forecast,
     )
 
@@ -103,6 +105,14 @@ def _sf(d: dict, key: str):
         return None
     f = float(val)
     return None if math.isnan(f) else round(f, 1)
+
+
+def _si(d: dict, key: str):
+    """Extract a single int value, None if missing."""
+    val = d.get(key)
+    if val is None:
+        return None
+    return int(val)
 
 
 def _kmh(kmh):

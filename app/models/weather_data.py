@@ -53,5 +53,12 @@ class WeatherData(BaseModel):
     sunrise: datetime | None = None                    # UTC – Sonnenaufgang heute
     sunset: datetime | None = None                     # UTC – Sonnenuntergang heute
 
+    # Status (Home Assistant compatible)
+    status: str | None = None
+
+    # WMO weather code (from Open-Meteo)
+    weather_code: int | None = None
+    cloud_cover: int | None = None
+
     # Messstationen
     stations: list[WeatherStation] = Field(default_factory=list)
