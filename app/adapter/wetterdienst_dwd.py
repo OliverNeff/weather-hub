@@ -662,14 +662,29 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
         "uv_index": None,
     }
 
+    # Find nearest future forecast entry as anchor. MosMix data is hourly,
+    # so the 30m window may be too narrow to catch any entries on its own.
+    future = precip.filter(precip["date"] >= now_rounded)
+
+    anchor: datetime | None = None
+    gap_minutes: float = 999
+    if len(future) > 0:
+        anchor = cast(datetime, future["date"].min())
+        gap_minutes = (anchor - now_rounded).total_seconds() / 60
+
     for label, delta in [
         ("30m", timedelta(minutes=30)),
         ("1h", timedelta(hours=1)),
         ("2h", timedelta(hours=2)),
     ]:
-        window = precip.filter(
-            (precip["date"] >= now_rounded) & (precip["date"] < now_rounded + delta)
-        )
+        # For 30m: include the nearest future entry if it's within the next hour
+        # (MosMix is hourly; a 30m window alone would miss all entries).
+        if label == "30m" and gap_minutes <= 60 and anchor is not None:
+            window = future.filter(future["date"] == anchor)
+        else:
+            window = precip.filter(
+                (precip["date"] >= now_rounded) & (precip["date"] < now_rounded + delta)
+            )
         if len(window) > 0:
             mean = window["value"].mean()
             if mean is not None and isinstance(mean, (int, float)) and not math.isnan(float(mean)):
