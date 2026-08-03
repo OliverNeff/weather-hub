@@ -544,18 +544,22 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             if existing_time is None or dt > existing_time:
                 primary["time"] = dt
 
+    # Keep only stations that reported at least one value, trim to nearest _NUM_STATIONS.
+    with_data = [s for s in stations_seen.values() if s["time"] is not None]
+    trimmed = sorted(with_data, key=lambda s: s.get("distance", 0))[:_NUM_STATIONS]
+
     # Log which stations contributed data
-    if stations_seen:
+    if trimmed:
         logger.info(
             "dwd: used %d station(s) for observation: %s",
-            len(stations_seen),
+            len(trimmed),
             ", ".join(
                 f"{v['station_name']}({v.get('distance', 0):.1f}km)"
-                for v in sorted(stations_seen.values(), key=lambda s: s.get("distance", 0))
+                for v in trimmed
             ),
         )
 
-    all_stations = sorted(stations_seen.values(), key=lambda s: s.get("distance", 0))
+    all_stations = trimmed
 
     # Return only if we have at least temperature or wind
     if primary["temperature"] is None and primary["wind_speed"] is None:
