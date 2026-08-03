@@ -135,7 +135,7 @@ Alle drei Datenanbieter laufen parallel. Ein einzelner Anbieterausfall beeinflus
 
 Kombiniert zwei DWD-Datenquellen:
 
-**Beobachtung** — Liefert Temperatur, Windgeschwindigkeit, Windböen und Niederschlag aus dem `recent`-Zeitraum (10-Minuten-Aeolung). Jeder Parameter wird in einer eigenen Anfrage abgerufen, dabei die jeweils naechste Station, die den Parameter meldet. Die vier Anfragen laufen parallel via `ThreadPoolExecutor`.
+**Beobachtung** — Liefert Temperatur, Windgeschwindigkeit, Windböen und Niederschlag aus dem `recent`-Zeitraum (10-Minuten-Aeolung). Jeder Parameter wird aus einem eigenen Pool der naechsten Stationen abgerufen, die diesen Parameter melden — Niederschlag aus dem naechsten Regenmesser, Wind aus dem naechsten Anemometer. Das ist wichtig, weil viele kleine DWD-Stationen nur Niederschlag messen. Die vier Anfragen laufen parallel via `ThreadPoolExecutor`. Veraltete Messungen (>2h) werden verworfen, das Ergebnis wird auf die 3 naechsten Stationen mit gueltigen Daten beschränkt.
 
 **Vorhersage** — Stündliche MosMix Small-Prognosen fuer Niederschlag und Strahlung. Bildet Fenster fuer 30 Min/1 Std/2 Std und mittelt die Niederschlagswerte. Der UV-Index wird aus Globalstrahlung mit `* 0.019` approximiert und auf 0–16 begrenzt (Grobe Schaeztung).
 
