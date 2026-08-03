@@ -55,9 +55,8 @@ The only public endpoint is `GET /weather/data?lat=...&lon=...`.
 Three adapters run in parallel per request. A single adapter failure doesn't take down the response.
 
 **DWD Adapter** (`wetterdienst_dwd.py`): Combines two DWD sources:
-- **Observation** (`DwdObservationRequest`): Fetches temperature, wind speed, wind gust, and precipitation from `recent` period at `10_minutes` resolution. Each parameter is fetched in a separate request targeting the nearest station that reports it (not all stations report all parameters). The 4 parameter requests run in parallel via `ThreadPoolExecutor`.
+- **Observation**: Fetches temperature, wind speed, wind gust, and precipitation from `recent` period at `10_minutes` resolution. Each parameter is fetched from its own pool of nearest stations — precipitation from the nearest rain gauges, wind from the nearest anemometers, etc. (Not all stations report all parameters). The 4 parameter requests run in parallel via `ThreadPoolExecutor`. Only stations with fresh data (>2h threshold for precipitation) appear in the result, trimmed to the 3 nearest.
 - **Forecast** (`DwdMosmixRequest`): Hourly MosMix Small prognoses for precipitation and radiation. Builds 30m/1h/2h windows from now, averages the precip values in each window for amount and intensity. UV index is approximated from global radiation (J/m²) with `* 0.019` factor, clamped to 0-16 — this is a rough estimate, not a real UV measurement.
-- **Station selection**: picks the 3 nearest stations by distance, not by dataset count. Proximity matters most for local rain/wind accuracy. Logs which stations are selected and which are skipped.
 
 **Open-Meteo Adapter** (`openmeteo.py`): Calls the Open-Meteo forecast API via plain `httpx` (not the `openmeteo_requests` FFI client). Provides current temperature, apparent temperature, wind, precipitation, UV index (accurate), plus sunrise/sunset with sun elevation. Typical response time: <1s.
 
@@ -112,5 +111,6 @@ pointing to a single corporate cert break uv's TLS chain validation against pypi
 
 - **`fastapi dev` crashes on Windows**: the `rich_toolkit` console in `fastapi_cli` uses the system encoding (cp1252 on German Windows). Station names with non-ASCII characters (`Großostheim`) cause a `UnicodeEncodeError`. Use `uv run uvicorn app.main:app --reload` instead.
 - **DWD observation data is stale**: DWD `recent` period data for small stations can be 12+ hours old. Temperature/wind may only be available from stations 20km+ away. The merge layer prefers Open-Meteo's fresher data for temperature and UV.
+- **DWD per-parameter station selection**: In areas with many precip-only stations (e.g., Eifel), the old distance-only approach would pick rain gauges that miss temperature/wind. Now each parameter fetches from its own pool of nearest stations, so local rain data is used when available while temperature/wind come from full-coverage stations.
 - **DWD MosMix UV index is inaccurate**: the `* 0.019` factor from global radiation gives a rough approximation (e.g., returns 1.6 when real UV is 6). Open-Meteo provides the accurate UV index and takes precedence via the freshness-based merge.
 - **DWD `.values.all()` loads full station ZIPs**: even when requesting a single parameter, wetterdienst downloads the entire station data file. The per-parameter approach (4 parallel requests) is faster than one combined request with 3 station ZIPs (~4s vs ~40s).
