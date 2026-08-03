@@ -505,6 +505,128 @@ class TestFetchObservation:
 
         assert result == _empty_observation()
 
+    def test_precip_only_stations_nearby_full_stations_far(self):
+        """Nearest stations only report precipitation; a farther station has all params.
+
+        This covers the 'Eifel' scenario: 3 precip-only stations at 5-11 km,
+        one full-coverage station (Andernach) at 14 km. Per-parameter selection
+        should pick the nearest precip stations for rain and the full station
+        for temperature/wind.
+        """
+
+        def mock_all_stations():
+            return [
+                {"id": "14043", "lat": 50.38, "lon": 7.53, "name": "Mülheim", "distance": 5.0, "coverage": 1},
+                {"id": "13689", "lat": 50.43, "lon": 7.66, "name": "Höhr", "distance": 10.3, "coverage": 1},
+                {"id": "00161", "lat": 50.42, "lon": 7.42, "name": "Andernach", "distance": 14.1, "coverage": 4},
+            ]
+
+        def mock_find_nearest(stations, lat, lon, count):
+            # Return all candidates within range, distance-sorted (what the impl does)
+            return [
+                {"id": "14043", "lat": 50.38, "lon": 7.53, "name": "Mülheim", "distance": 5.0, "coverage": 1},
+                {"id": "13689", "lat": 50.43, "lon": 7.66, "name": "Höhr", "distance": 10.3, "coverage": 1},
+                {"id": "00161", "lat": 50.42, "lon": 7.42, "name": "Andernach", "distance": 14.1, "coverage": 4},
+            ]
+
+        # Precipitation: available from all 3 stations
+        # Temperature/wind/wind_gust: only available from Andernach
+        def mock_get_stations_for_param(pk):
+            if pk == "precipitation":
+                return [
+                    {"id": "14043", "lat": 50.38, "lon": 7.53, "name": "Mülheim"},
+                    {"id": "13689", "lat": 50.43, "lon": 7.66, "name": "Höhr"},
+                    {"id": "00161", "lat": 50.42, "lon": 7.42, "name": "Andernach"},
+                ]
+            return [{"id": "00161", "lat": 50.42, "lon": 7.42, "name": "Andernach"}]
+
+        def mock_fetch_station(sid, zp, cc, dd):
+            # Return a fresh timestamp so precip isn't stale
+            return 1.0, datetime.now(timezone.utc)
+
+        with patch("app.adapter.wetterdienst_dwd._get_all_stations", mock_all_stations):
+            with patch("app.adapter.wetterdienst_dwd._find_nearest_stations", mock_find_nearest):
+                with patch(
+                    "app.adapter.wetterdienst_dwd._get_stations_for_param",
+                    mock_get_stations_for_param,
+                ):
+                    with patch(
+                        "app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station
+                    ):
+                        result = _fetch_observation(50.0, 9.0)
+
+        primary = result.get("_primary", {})
+        assert primary["temperature"] == 1.0
+        assert primary["wind_speed"] == 1.0
+        assert primary["precipitation"] == 1.0
+
+        # All 3 stations should appear (precip from all, temp/wind from Andernach)
+        station_ids = {s.get("station_name") for s in result.get("_all", [])}
+        assert "Mülheim" in station_ids
+        assert "Höhr" in station_ids
+        assert "Andernach" in station_ids
+
+    def test_per_param_selection_skips_unavailable_stations(self):
+        """When only some stations have a given parameter, only those are fetched.
+
+        Simulates 3 precip-only stations + 1 full station. Precip should be
+        fetched from all 3, temperature only from the full station.
+        """
+
+        def mock_all_stations():
+            return [
+                {"id": "PRECIP1", "lat": 50.0, "lon": 9.0, "name": "Precip1", "distance": 3.0, "coverage": 1},
+                {"id": "FULL1", "lat": 50.5, "lon": 9.5, "name": "Full1", "distance": 15.0, "coverage": 4},
+            ]
+
+        def mock_find_nearest(stations, lat, lon, count):
+            return [
+                {"id": "PRECIP1", "lat": 50.0, "lon": 9.0, "name": "Precip1", "distance": 3.0, "coverage": 1},
+                {"id": "FULL1", "lat": 50.5, "lon": 9.5, "name": "Full1", "distance": 15.0, "coverage": 4},
+            ]
+
+        def mock_get_stations_for_param(pk):
+            if pk == "precipitation":
+                return [
+                    {"id": "PRECIP1", "lat": 50.0, "lon": 9.0, "name": "Precip1"},
+                    {"id": "FULL1", "lat": 50.5, "lon": 9.5, "name": "Full1"},
+                ]
+            return [{"id": "FULL1", "lat": 50.5, "lon": 9.5, "name": "Full1"}]
+
+        fetch_calls = []
+
+        def mock_fetch_station(sid, zp, cc, dd):
+            fetch_calls.append((sid, dd))
+            return 1.0, datetime.now(timezone.utc)
+
+        with patch("app.adapter.wetterdienst_dwd._get_all_stations", mock_all_stations):
+            with patch("app.adapter.wetterdienst_dwd._find_nearest_stations", mock_find_nearest):
+                with patch(
+                    "app.adapter.wetterdienst_dwd._get_stations_for_param",
+                    mock_get_stations_for_param,
+                ):
+                    with patch(
+                        "app.adapter.wetterdienst_dwd._fetch_station_value", mock_fetch_station
+                    ):
+                        result = _fetch_observation(50.0, 9.0)
+
+        # Precipitation should be fetched from both PRECIP1 and FULL1
+        precip_calls = [c for c in fetch_calls if c[1] == "precipitation"]
+        precip_sids = {c[0] for c in precip_calls}
+        assert "PRECIP1" in precip_sids
+        assert "FULL1" in precip_sids
+
+        # Temperature should only be fetched from FULL1 (PRECIP1 has no temp)
+        temp_calls = [c for c in fetch_calls if c[1] == "air_temperature"]
+        temp_sids = {c[0] for c in temp_calls}
+        assert "FULL1" in temp_sids
+        assert "PRECIP1" not in temp_sids
+
+        # Result should have data
+        primary = result.get("_primary", {})
+        assert primary["temperature"] == 1.0
+        assert primary["precipitation"] == 1.0
+
 
 # ---------------------------------------------------------------------------
 # _fetch_forecast — error paths
