@@ -53,6 +53,7 @@ _MERGEABLE_FIELDS = [
     "sunset",
     "weather_code",
     "cloud_cover",
+    "precipitation_stops_at",
 ]
 
 # Wind + precipitation: take the max across all adapters.
@@ -223,7 +224,7 @@ async def get_weather_data(lat: float, lon: float) -> WeatherData:
     merged.temperature = temp_val
 
     for field in _MERGEABLE_FIELDS:
-        if field in ("time", "temperature", "feels_like"):
+        if field in ("time", "temperature", "feels_like", "precipitation_stops_at"):
             continue
         if field in _CONSERVATIVE_FIELDS:
             # Wind + precipitation: highest value across all adapters.
@@ -244,6 +245,13 @@ async def get_weather_data(lat: float, lon: float) -> WeatherData:
     precip_intensity = merged.precipitation_intensity
     if precip_intensity is not None:
         merged.precipitation_now = precip_intensity > 0
+
+    # precipitation_stops_at: prefer most granular source.
+    # Buienradar (5min) > Open-Meteo (15min/hourly) > DWD MosMix (1h).
+    stops_at = getattr(buienradar, "precipitation_stops_at", None)
+    if stops_at is None:
+        stops_at, _ = _pick_first(fresh, "precipitation_stops_at")
+    merged.precipitation_stops_at = stops_at
 
     # Derive Home Assistant-compatible status from merged data.
     merged.status = _compute_status(merged)

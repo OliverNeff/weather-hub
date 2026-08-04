@@ -53,6 +53,11 @@ class WeatherData(BaseModel):
     precipitation_intensity_next_2h: float | None = None
     # mm/h – stärkste erwartete Niederschlagsintensität der nächsten 120 Minuten
 
+    # Regen endet (Vorhersage)
+    precipitation_stops_at: datetime | None = None
+    # UTC-Zeitpunkt, an dem der aktuelle Regen voraussichtlich aufhört.
+    # None = keine Berechnung möglich (kein Regen / keine Daten).
+
     # Temperatur
     temperature: float | None = None  # °C – aktuelle Temperatur
     feels_like: float | None = None  # °C – gefühlte Temperatur

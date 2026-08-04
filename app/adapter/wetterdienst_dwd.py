@@ -640,6 +640,7 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
         "precip_2h": None,
         "intensity_2h": None,
         "uv_index": None,
+        "precipitation_stops_at": None,
     }
 
     # Find nearest future forecast entry as anchor. MosMix data is hourly,
@@ -683,7 +684,43 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
             uv_approx = round(mean_rad * 0.019, 1)
             forecast["uv_index"] = min(max(uv_approx, 0), 16)
 
+    # Calculate when precipitation stops
+    forecast["precipitation_stops_at"] = _precipitation_stops_at(future, now_rounded)
+
     return forecast
+
+
+def _precipitation_stops_at(
+    precip: pl.DataFrame, now: datetime
+) -> datetime | None:
+    """Find when current rain stops from MosMix hourly forecast.
+
+    Scans forward from now and finds the first gap (rain → no rain).
+    Returns the datetime of the last hourly entry with precipitation > 0
+    before that gap, or None if no rain data.
+    """
+    if len(precip) == 0:
+        return None
+
+    rows = precip.sort("date").iter_rows(named=True)
+    last_rain_dt: datetime | None = None
+    is_currently_raining = False
+
+    for row in rows:
+        dt = row["date"]
+        if dt < now:
+            continue
+        val = row["value"]
+        is_rain = val is not None and not math.isnan(float(val)) and val > 0
+
+        if is_rain:
+            last_rain_dt = dt
+            if not is_currently_raining:
+                is_currently_raining = True
+        elif is_currently_raining:
+            return last_rain_dt
+
+    return last_rain_dt
 
 
 # ---------------------------------------------------------------------------
@@ -730,6 +767,7 @@ async def fetch_wetterdienst_weather(
         precipitation_next_2h=_precip_bool("precip_2h"),
         precipitation_amount_next_2h=fc["precip_2h"],
         precipitation_intensity_next_2h=fc["intensity_2h"],
+        precipitation_stops_at=fc["precipitation_stops_at"],
         temperature=primary["temperature"],
         feels_like=None,
         uv_index=fc["uv_index"],
@@ -779,4 +817,5 @@ def _empty_forecast() -> dict[str, Any]:
         "precip_2h": None,
         "intensity_2h": None,
         "uv_index": None,
+        "precipitation_stops_at": None,
     }
