@@ -50,6 +50,7 @@ async def fetch_openmeteo_weather(latitude: float, longitude: float) -> WeatherD
 
     now = datetime.now(timezone.utc)
     forecast = _parse_minutely_precipitation(minutely_15, hourly, now)
+    forecast["precipitation_stops_at"] = _precipitation_stops_at(minutely_15, hourly, now)
     weather_time = _parse_iso(current.get("time"))
 
     # Compute current precipitation intensity from minutely_15 data (mm/15min → mm/h).
@@ -309,3 +310,80 @@ def _parse_hourly_precipitation(
                 result[f"precipitation_intensity_next_{label}"] = 0.0
 
     return result
+
+
+def _precipitation_stops_at(
+    minutely_15: dict[str, Any], hourly: dict[str, Any], now: datetime
+) -> datetime | None:
+    """Determine when the current precipitation is expected to stop.
+
+    Scans forward from now and finds the first gap (rain → no rain).
+    Returns the timestamp of the last rainy interval before that gap.
+
+    Uses minutely_15 data (15min resolution, ~1h) as primary source.
+    Falls back to hourly data (24h) when minutely_15 is unavailable or
+    shows continuous rain through the full window.
+    """
+    times = minutely_15.get("time", [])
+    values = minutely_15.get("precipitation", [])
+
+    # Fallback to hourly if minutely_15 not available
+    if not times or not values:
+        return _precip_stops_hourly(hourly, now)
+
+    last_rain_dt: datetime | None = None
+    is_currently_raining = False
+
+    for i, ts in enumerate(times):
+        dt = _parse_iso(ts)
+        if dt is None or dt < now:
+            continue
+        val = values[i]
+        is_rain = val is not None and val > 0
+
+        if is_rain:
+            last_rain_dt = dt
+            if not is_currently_raining:
+                is_currently_raining = True
+        elif is_currently_raining:
+            # Found the first gap — rain stopped at last_rain_dt
+            return last_rain_dt
+
+    # Rain continues through the full minutely window — extend with hourly
+    if is_currently_raining:
+        hourly_stop = _precip_stops_hourly(hourly, now)
+        if hourly_stop is not None:
+            return hourly_stop
+
+    # Check hourly for current rain session stop
+    if not is_currently_raining:
+        return _precip_stops_hourly(hourly, now)
+
+    return last_rain_dt
+
+
+def _precip_stops_hourly(hourly: dict[str, Any], now: datetime) -> datetime | None:
+    """Find when current rain stops from hourly data."""
+    times = hourly.get("time", [])
+    precip = hourly.get("precipitation", [])
+    if not times or not precip:
+        return None
+
+    last_rain_dt: datetime | None = None
+    is_currently_raining = False
+
+    for i, ts in enumerate(times):
+        dt = _parse_iso(ts)
+        if dt is None or dt < now:
+            continue
+        val = precip[i]
+        is_rain = val is not None and val > 0
+
+        if is_rain:
+            last_rain_dt = dt
+            if not is_currently_raining:
+                is_currently_raining = True
+        elif is_currently_raining:
+            return last_rain_dt
+
+    return last_rain_dt
