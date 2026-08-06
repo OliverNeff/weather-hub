@@ -22,7 +22,8 @@ logging.basicConfig(
 )
 
 # Timer interval matches MosMix cache TTL
-_TIMER_INTERVAL = 600  # 10 minutes in seconds
+# Timer interval matches MosMix cache TTL (configurable via MQTT_INTERVAL env var, default 10min)
+_TIMER_INTERVAL = int(os.environ.get("MQTT_INTERVAL", "600"))
 
 
 async def _weather_timer(lat: float, lon: float) -> None:
@@ -31,7 +32,12 @@ async def _weather_timer(lat: float, lon: float) -> None:
         await asyncio.sleep(_TIMER_INTERVAL)
         logger.info("timer: fetching weather for lat=%.2f lon=%.2f", lat, lon)
         try:
-            await get_weather_data(lat=lat, lon=lon)
+            result = await get_weather_data(lat=lat, lon=lon)
+            logger.info(
+                "timer: done — temp=%.1f precip=%.1f",
+                result.temperature or float("nan"),
+                result.precipitation_intensity or float("nan"),
+            )
         except Exception:
             logger.error("timer: fetch failed for lat=%.2f lon=%.2f", lat, lon, exc_info=True)
 
