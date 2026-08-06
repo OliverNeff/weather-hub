@@ -791,15 +791,6 @@ async def fetch_wetterdienst_weather(
             )
         )
 
-    # Publish via MQTT if MosMix cache was cold (longest TTL among DWD caches).
-    was_cache_miss = fc.get("_cache_miss", False)
-    if was_cache_miss:
-        try:
-            from app.mqtt import publish_weather
-            await publish_weather(weather_data)
-        except Exception:
-            logger.warning("mqtt: failed to publish weather data", exc_info=True)
-
     return weather_data
 
 

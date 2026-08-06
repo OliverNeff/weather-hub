@@ -11,7 +11,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 
-from app.mqtt import MQTTClient, StubClient, set_client
+from app.mqtt import MQTTClient, StubClient, publish_weather, set_client
 from app.routers import weather_data
 from app.routers.weather_data import get_weather_data
 
@@ -21,18 +21,18 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 
-# Timer interval matches MosMix cache TTL
 # Timer interval matches MosMix cache TTL (configurable via MQTT_INTERVAL env var, default 10min)
 _TIMER_INTERVAL = int(os.environ.get("MQTT_INTERVAL", "600"))
 
 
 async def _weather_timer(lat: float, lon: float) -> None:
-    """Background task: fetch weather every _TIMER_INTERVAL and let MQTT trigger on cache miss."""
+    """Background task: fetch weather every _TIMER_INTERVAL and publish via MQTT."""
     while True:
         await asyncio.sleep(_TIMER_INTERVAL)
         logger.info("timer: fetching weather for lat=%.2f lon=%.2f", lat, lon)
         try:
             result = await get_weather_data(lat=lat, lon=lon)
+            await publish_weather(result)
             logger.info(
                 "timer: done — temp=%.1f precip=%.1f",
                 result.temperature or float("nan"),
