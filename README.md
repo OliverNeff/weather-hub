@@ -179,4 +179,40 @@ Erstelle eine `.env`-Datei im Projektstammverzeichnis:
 # true  = Cache aktiviert (~0,3s warm, ~7s kalt) — Standard
 # false = Cache deaktiviert (immer frisch vom DWD)
 DWD_CACHE=true
+
+# MQTT-Push: Wetterdaten werden bei MosMix-Cache-Miss (10min) per MQTT
+# an weather-hub/state gesendet. Wenn MQTT_BROKER nicht gesetzt, wird ein
+# Stub verwendet (logged, kein Broker erforderlich).
+# MQTT_BROKER=mqtt://broker.example.com
+# MQTT_PORT=1883
+# MQTT_USERNAME=
+# MQTT_PASSWORD=
+# MQTT_CLIENT_ID=weather-hub
+# MQTT_TOPIC=weather-hub/state
 ```
+
+## MQTT-Push
+
+Wenn `MQTT_BROKER` gesetzt ist, werden die gemergten Wetterdaten bei einem MosMix-Cache-Miss (~alle 10 Minuten) per MQTT an das Topic `weather-hub/state` gesendet. Das Payload enthält alle WeatherData-Felder (Home-Assistant-kompatibel).
+
+Ohne `MQTT_BROKER` läuft ein Stub, der die MQTT-Nachricht im Log anzeigt — ideal für die Entwicklung ohne MQTT-Broker.
+
+Beispiel-Payload:
+
+```json
+{
+  "temperature": 21.4,
+  "feels_like": 19.8,
+  "wind_speed": 5.8,
+  "precipitation_now": false,
+  "precipitation_next_30m": false,
+  "precipitation_next_1h": false,
+  "precipitation_next_2h": false,
+  "uv_index": 0,
+  "status": "partlycloudy",
+  "weather_code": 2,
+  "stations": [...]
+}
+```
+
+Das Topic `weather-hub/state` passt zum Zigbee2MQTT / Home Assistant-Muster. Setze `MQTT_TOPIC` auf einen anderen Wert (z. B. `weather-hub/garten/state`) fuer mehrere Standorte.
