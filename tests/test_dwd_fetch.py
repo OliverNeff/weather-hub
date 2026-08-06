@@ -768,6 +768,8 @@ class TestFetchWetterdienstWeather:
             "precip_2h": None,
             "intensity_2h": None,
             "uv_index": 5.0,
+            "precipitation_stops_at": None,
+            "_cache_miss": False,
         }
 
         with (
