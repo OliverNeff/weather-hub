@@ -80,8 +80,8 @@ class StubClient:
         pass
 
     async def publish(self, topic: str, payload: Any) -> None:
-        summary = json.dumps(payload, default=str)[:200]
-        logger.info("mqtt:stub — would publish to %s: %s", topic, summary)
+        summary = json.dumps(payload, default=str, indent=2)
+        logger.info("mqtt:stub — would publish to %s:\n%s", topic, summary)
 
     @property
     def is_connected(self) -> bool:
