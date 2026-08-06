@@ -587,7 +587,9 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
     # Check cache
     cached = _mosmix_cache.get(cache_key)
     if cached and now - cached[0] < _MOSMIX_CACHE_TTL:
-        return _process_forecast_df(cached[1], now)
+        result = _process_forecast_df(cached[1], now)
+        result["_cache_miss"] = False
+        return result
 
     request = DwdMosmixRequest(
         parameters=[
@@ -620,7 +622,9 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any]:
     # Cache the raw forecast data
     _mosmix_cache[cache_key] = (now, vals_df)
 
-    return _process_forecast_df(vals_df, now)
+    result = _process_forecast_df(vals_df, now)
+    result["_cache_miss"] = True
+    return result
 
 
 def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]:
@@ -787,6 +791,15 @@ async def fetch_wetterdienst_weather(
             )
         )
 
+    # Publish via MQTT if MosMix cache was cold (longest TTL among DWD caches).
+    was_cache_miss = fc.get("_cache_miss", False)
+    if was_cache_miss:
+        try:
+            from app.mqtt import publish_weather
+            await publish_weather(weather_data)
+        except Exception:
+            logger.warning("mqtt: failed to publish weather data", exc_info=True)
+
     return weather_data
 
 
@@ -818,4 +831,5 @@ def _empty_forecast() -> dict[str, Any]:
         "intensity_2h": None,
         "uv_index": None,
         "precipitation_stops_at": None,
+        "_cache_miss": False,
     }
