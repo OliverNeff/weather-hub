@@ -191,15 +191,18 @@ DWD_CACHE=true
 # MQTT_TOPIC=weather-hub/state
 # MQTT_LAT=49.87
 # MQTT_LON=8.93
+# MQTT_INTERVAL=600  # seconds, default 10min (matches MosMix cache TTL)
 ```
 
 ## MQTT-Push
 
-Wenn `MQTT_LAT` und `MQTT_LON` gesetzt sind, startet ein Background-Timer, der alle 10 Minuten (MosMix Cache TTL) die Wetterdaten für den konfigurierten Standort abruft. Bei einem Cache-Miss werden die gemergten Wetterdaten per MQTT an das Topic `weather-hub/state` gesendet. Das Payload enthält alle WeatherData-Felder (Home-Assistant-kompatibel).
+Wenn `MQTT_LAT` und `MQTT_LON` gesetzt sind, startet ein Background-Timer, der alle 10 Minuten die Wetterdaten für den konfigurierten Standort abruft und die gemergten Ergebnisse (alle drei Anbieter) per MQTT an das Topic `weather-hub/state` sendet. Das Payload enthält alle WeatherData-Felder (Home-Assistant-kompatibel).
+
+Der Interval ist über `MQTT_INTERVAL` konfigurierbar (Standard: `600` = 10 Minuten, entspricht MosMix Cache TTL).
 
 Wenn `MQTT_BROKER` nicht gesetzt ist, läuft ein Stub, der die MQTT-Nachricht im Log anzeigt — ideal für die Entwicklung ohne MQTT-Broker.
 
-Ohne `MQTT_LAT`/`MQTT_LON` startet kein Timer — die MQTT-Push-Funktion kann auch über HTTP-Requests ausgelöst werden.
+Ohne `MQTT_LAT`/`MQTT_LON` startet kein Timer.
 
 Beispiel-Payload:
 

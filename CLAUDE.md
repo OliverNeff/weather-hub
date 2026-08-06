@@ -11,7 +11,7 @@ Weather Hub is a FastAPI microservice that fetches weather data (current conditi
 - **Runtime**: Python 3.14+ (managed by `uv`)
 - **Framework**: FastAPI [standard](pyproject.toml) (includes uvicorn, starlette, pydantic)
 - **Weather providers**: `buienradar` (1.0.9), `wetterdienst` (DWD/MosMix), `httpx` (Open-Meteo)
-- **MQTT**: `fastmqtt` (publishes merged weather data on cache miss)
+- **MQTT**: `fastmqtt` (publishes merged weather data on timer)
 - **Utilities**: `haversine` (distance), `polars` (data processing)
 - **Package manager**: `uv` (see `uv.lock`)
 
@@ -81,18 +81,18 @@ The router fetches all 3 adapters in parallel, then merges:
 ### DWD caching
 
 Two layers:
-1. **In-memory MosMix cache** (`_mosmix_cache`) — 10-minute TTL, cache key `{lat:.2f},{lon:.2f}`. MosMix updates every 1-3 hours; a fresh fetch takes ~11s. **On cache miss, the merged WeatherData is published via MQTT** (see MQTT Push below).
+1. **In-memory MosMix cache** (`_mosmix_cache`) — 10-minute TTL, cache key `{lat:.2f},{lon:.2f}`. MosMix updates every 1-3 hours; a fresh fetch takes ~11s.
 2. **fsspec disk cache** (wetterdienst default) — controlled by `DWD_CACHE` env var in `.env`. When enabled, speeds up repeated requests from ~7s to ~0.3s. If the cache returns empty results, it is automatically cleared and retried once. Default: disabled (stale cache can cause "does not have a list of files" errors).
 
 ### MQTT Push (`app/mqtt.py`)
 
-When the DWD MosMix cache expires (longest TTL among DWD caches), the freshly fetched weather data is published via MQTT to `weather-hub/state`.
+When `MQTT_LAT` and `MQTT_LON` are set, a background timer fetches weather data every 10 minutes (configurable via `MQTT_INTERVAL`) and publishes the merged result via MQTT to `weather-hub/state`.
 
 - **Real broker**: Set `MQTT_BROKER` env var. Uses `fastmqtt.FastMQTT` with `JsonEncoder`.
 - **Stub mode** (default): When `MQTT_BROKER` is empty, uses `StubClient` that logs what would be published. No broker needed for dev.
 - **Lifecycle**: MQTT client is created/connected in FastAPI `lifespan`, disconnected on shutdown.
 - **Payload**: All `WeatherData` fields (already designed for Home Assistant compatibility).
-- **Config**: `MQTT_BROKER`, `MQTT_PORT` (1883), `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_CLIENT_ID` (weather-hub), `MQTT_TOPIC` (weather-hub/state).
+- **Config**: `MQTT_BROKER`, `MQTT_PORT` (1883), `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_CLIENT_ID` (weather-hub), `MQTT_TOPIC` (weather-hub/state), `MQTT_LAT`, `MQTT_LON`, `MQTT_INTERVAL` (600s).
 
 ## Windows SSL Configuration
 
