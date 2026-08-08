@@ -5,9 +5,16 @@ Weather Hub ist ein FastAPI-Mikrodienst, der Wetterdaten mehrerer Anbieter aggre
 ## Starten
 
 ```bash
+# Entwicklung
 uv sync
 uv run uvicorn app.main:app --reload
 curl "http://127.0.0.1:8000/weather/data?lat=49.87&lon=8.93"
+```
+
+Oder mit Docker:
+
+```bash
+docker compose up --build
 ```
 
 Die [OpenAPI-Dokumentation](http://127.0.0.1:8000/docs) ist unter `/docs` erhaeltbar.
@@ -192,6 +199,10 @@ DWD_CACHE=true
 # MQTT_LAT=49.87
 # MQTT_LON=8.93
 # MQTT_INTERVAL=600  # seconds, default 10min (matches MosMix cache TTL)
+
+# Logging level: DEBUG, INFO, WARNING, ERROR (default: WARNING)
+# INFO = all activity (dev), WARNING = errors only (production)
+LOG_LEVEL=WARNING
 ```
 
 ## MQTT-Push
