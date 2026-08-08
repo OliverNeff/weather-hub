@@ -67,7 +67,7 @@ def build_sensor_config(
         f"{DISCOVERY_PREFIX}/sensor/weather-hub/{entity_id}/config",
         {
             **_base_config(st, f"weather-hub-{entity_id}", name),
-            "value_template": f"{{{{ value_json.{field} }}}}",
+            "value_template": f"{{{{ value_json.{field} if value_json.{field} is not none else 'unknown' }}}}",
             "unit_of_measurement": unit_of_measurement,
             "device_class": device_class,
             "state_class": state_class,
