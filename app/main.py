@@ -17,7 +17,7 @@ from app.routers.weather_data import get_weather_data
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "WARNING")),
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 
