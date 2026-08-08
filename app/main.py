@@ -33,11 +33,7 @@ async def _weather_timer(lat: float, lon: float) -> None:
         try:
             result = await get_weather_data(lat=lat, lon=lon)
             await publish_weather(result)
-            logger.info(
-                "timer: done — temp=%.1f precip=%.1f",
-                result.temperature or float("nan"),
-                result.precipitation_intensity or float("nan"),
-            )
+            logger.info("timer: done")
         except Exception:
             logger.error("timer: fetch failed for lat=%.2f lon=%.2f", lat, lon, exc_info=True)
 
