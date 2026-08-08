@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
@@ -203,8 +203,25 @@ def _compute_status(wd: WeatherData) -> str | None:
     return None
 
 
-@router.get("", response_model=WeatherData)
-async def get_weather_data(lat: float, lon: float) -> WeatherData:
+@router.get("", response_model=WeatherData, responses={200: {"model": WeatherData}})
+async def get_weather_data(
+    lat: float = Query(..., description="Latitude of the location (decimal degrees)", ge=-90, le=90),
+    lon: float = Query(..., description="Longitude of the location (decimal degrees)", ge=-180, le=180),
+) -> WeatherData:
+    """Current weather and short-term precipitation forecast.
+
+    Fetches data from three providers in parallel (DWD, Open-Meteo, Buienradar)
+    and merges the results. A single provider failure doesn't affect the response.
+
+    **Merge strategy**
+
+    - Wind / precipitation: maximum value across all providers
+    - Temperature / feels-like: freshest measurement
+    - UV / sun data: freshest source (Open-Meteo provides accurate UV)
+    - Status: derived from merged data (Home Assistant compatible)
+
+    All response fields are nullable — `null` means the provider had no data.
+    """
     # Fetch all three adapters in parallel — each wrapped so one failure
     # doesn't take down the whole request.
     dwd, buienradar, openmeteo = await asyncio.gather(
