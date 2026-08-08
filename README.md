@@ -203,6 +203,9 @@ DWD_CACHE=true
 # Logging level: DEBUG, INFO, WARNING, ERROR (default: WARNING)
 # INFO = all activity (dev), WARNING = errors only (production)
 LOG_LEVEL=WARNING
+
+# Home Assistant MQTT Discovery (optional).
+# HA_DISCOVERY_PREFIX=homeassistant
 ```
 
 ## MQTT-Push
@@ -234,3 +237,32 @@ Beispiel-Payload:
 ```
 
 Das Topic `weather-hub/state` passt zum Zigbee2MQTT / Home Assistant-Muster. Setze `MQTT_TOPIC` auf einen anderen Wert (z. B. `weather-hub/garten/state`) fuer mehrere Standorte.
+
+## Home Assistant MQTT Discovery
+
+Wenn ein echter MQTT-Broker konfiguriert ist (`MQTT_BROKER`), publiziert Weather Hub beim Start automatisch [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) Konfigurationen. Home Assistant erkennt das Gerät automatisch.
+
+**Erkannte Entitäten:**
+
+| Typ | Name | Daten |
+|-----|------|-------|
+| **Weather** | Weather Hub | Status, Temperatur, Wind, Niederschlag, UV, Bewölkung |
+| **Sensor** | Temperature | °C |
+| **Sensor** | Feels Like | °C |
+| **Sensor** | Precipitation Intensity | mm/h |
+| **Sensor** | Wind Speed | m/s |
+| **Sensor** | Wind Gust | m/s |
+| **Sensor** | UV Index | 0–16+ |
+| **Sensor** | Sun Elevation | Grad |
+| **Binary** | Precipitation Now | moisture |
+| **Binary** | Precipitation 30m | problem |
+| **Binary** | Precipitation 1h | problem |
+| **Binary** | Precipitation 2h | problem |
+
+Alle Entitäten sind unter einem Gerät gruppiert: "Weather Hub". Discovery Messages verwenden `retain=true` und überleben Broker Restarts.
+
+In Stub-Modus (kein Broker) wird Discovery übersprungen.
+
+Konfiguration:
+- `MQTT_TOPIC` — das State-Topic (Standard: `weather-hub/state`) — Discovery referenziert dieses
+- `HA_DISCOVERY_PREFIX` — Discovery-Prefix (Standard: `homeassistant`)
