@@ -88,7 +88,7 @@ def build_binary_sensor_config(
         f"{DISCOVERY_PREFIX}/binary_sensor/weather-hub/{entity_id}/config",
         {
             **_base_config(st, f"weather-hub-{entity_id}", name),
-            "value_template": f"{{{{ value_json.{field} | default(false) | bool }}}}",
+            "value_template": f"{{{{ 'ON' if value_json.{field} else 'OFF' }}}}",
             "device_class": device_class,
         },
     )
