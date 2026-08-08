@@ -97,14 +97,8 @@ def set_client(client: "MQTTClient | StubClient") -> None:
 
 
 def _payload_from_weather(data: WeatherData) -> dict[str, Any]:
-    """Convert WeatherData to dict for MQTT payload (all fields)."""
-    payload = data.model_dump(mode="json", exclude_none=True)
-    # Convert nested station models to dicts
-    payload["stations"] = [
-        {"source": s.source, "name": s.name, "lat": s.lat, "lon": s.lon, "time": str(s.time) if s.time else None}
-        for s in data.stations or []
-    ]
-    return payload
+    """Convert WeatherData to dict for MQTT payload (no stations)."""
+    return data.model_dump(mode="json", exclude={"stations"})
 
 
 async def publish_weather(data: WeatherData) -> None:

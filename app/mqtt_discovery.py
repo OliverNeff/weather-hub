@@ -123,6 +123,13 @@ async def discover_all(client: "MQTTClient | StubClient") -> None:
                             device_class="uv_index", state_class="measurement"),
         build_sensor_config("sun-elevation", "sun_elevation", name="Sun Elevation",
                             unit_of_measurement="°"),
+        build_sensor_config("cloud-cover", "cloud_cover", name="Cloud Cover",
+                            unit_of_measurement="%"),
+        build_sensor_config("weather-code", "weather_code", name="Weather Code"),
+        build_sensor_config("sunrise", "sunrise", name="Sunrise"),
+        build_sensor_config("sunset", "sunset", name="Sunset"),
+        build_sensor_config("status", "status", name="Status"),
+        build_sensor_config("precip-stops-at", "precipitation_stops_at", name="Precipitation Stops At"),
 
         # Precipitation forecast amounts (mm)
         build_sensor_config("precip-amount-30m", "precipitation_amount_next_30m",
