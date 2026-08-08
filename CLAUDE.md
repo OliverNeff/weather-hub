@@ -21,6 +21,7 @@ Weather Hub is a FastAPI microservice that fetches weather data (current conditi
 app/
 ├── main.py                        # FastAPI app entry point, logging setup, MQTT lifespan
 ├── mqtt.py                        # MQTT push client (FastMQTT + StubClient)
+├── mqtt_discovery.py              # Home Assistant MQTT Discovery configs
 ├── routers/
 │   └── weather_data.py            # GET /weather/data?lat=&lon=
 ├── models/
@@ -93,6 +94,16 @@ When `MQTT_LAT` and `MQTT_LON` are set, a background timer fetches weather data 
 - **Lifecycle**: MQTT client is created/connected in FastAPI `lifespan`, disconnected on shutdown.
 - **Payload**: All `WeatherData` fields (already designed for Home Assistant compatibility).
 - **Config**: `MQTT_BROKER`, `MQTT_PORT` (1883), `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_CLIENT_ID` (weather-hub), `MQTT_TOPIC` (weather-hub/state), `MQTT_LAT`, `MQTT_LON`, `MQTT_INTERVAL` (600s).
+
+### MQTT Discovery (`app/mqtt_discovery.py`)
+
+On startup with a real broker, publishes Home Assistant MQTT Discovery configs with `retain=true`. Skipped in stub mode.
+
+- `discover_all(client)` — entry point, called from lifespan, publishes 13 entities
+- `build_weather_config()` — weather entity with `temperature_attribute`, `wind_speed_attribute`, `uv_index_attribute`, `precipitation_intensity_attribute`, `cloud_cover_attribute`
+- `build_sensor_config()` / `build_binary_sensor_config()` — generic sensor/binary sensor builders
+- `DISCOVERY_PREFIX` configurable via `HA_DISCOVERY_PREFIX` (default: `homeassistant`)
+- Entities: 1 weather + 7 sensors + 4 binary sensors, all under device "Weather Hub"
 
 ## Windows SSL Configuration
 

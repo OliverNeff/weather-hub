@@ -54,12 +54,13 @@ class MQTTClient:
         self._connected = False
         logger.info("mqtt: disconnected")
 
-    async def publish(self, topic: str, payload: Any) -> None:
+    async def publish(self, topic: str, payload: Any, retain: bool = False) -> None:
         if not self._connected:
             logger.warning("mqtt: not connected, skipping publish to %s", topic)
             return
-        await self._client.publish(topic, payload)
-        logger.info("mqtt: published to %s (%d fields)", topic, len(payload) if isinstance(payload, dict) else "?")
+        await self._client.publish(topic, payload, retain=retain)
+        tag = " (retained)" if retain else ""
+        logger.info("mqtt: published to %s (%d fields)%s", topic, len(payload) if isinstance(payload, dict) else "?", tag)
 
     @property
     def is_connected(self) -> bool:
@@ -79,9 +80,10 @@ class StubClient:
     async def disconnect(self) -> None:
         pass
 
-    async def publish(self, topic: str, payload: Any) -> None:
+    async def publish(self, topic: str, payload: Any, retain: bool = False) -> None:
         summary = json.dumps(payload, default=str, indent=2)
-        logger.info("mqtt:stub — would publish to %s:\n%s", topic, summary)
+        tag = " [retained]" if retain else ""
+        logger.info("mqtt:stub — would publish to %s%s:\n%s", topic, tag, summary)
 
     @property
     def is_connected(self) -> bool:

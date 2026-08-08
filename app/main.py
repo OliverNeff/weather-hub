@@ -50,6 +50,13 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         client = StubClient()
     set_client(client)
 
+    # Home Assistant MQTT Discovery (real broker only)
+    if broker:
+        from app.mqtt_discovery import discover_all
+        await discover_all(client)
+    else:
+        logger.info("discovery: skipped (no MQTT broker configured)")
+
     # Start background timer if lat/lon configured
     task = None
     mqtt_lat = os.environ.get("MQTT_LAT", "").strip()
