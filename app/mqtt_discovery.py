@@ -155,7 +155,6 @@ async def discover_all(client: "MQTTClient | StubClient") -> None:
             "uv-index",
             "uv_index",
             name="UV Index",
-            device_class="uv_index",
             state_class="measurement",
         ),
         build_sensor_config(
