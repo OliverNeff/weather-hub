@@ -39,7 +39,7 @@ async def _weather_timer(lat: float, lon: float) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
+async def lifespan(app: FastAPI):
     # MQTT client setup
     broker = os.environ.get("MQTT_BROKER", "").strip()
     client: MQTTClient | StubClient

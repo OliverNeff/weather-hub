@@ -167,6 +167,7 @@ def _calculate_precipitation_stops_at(raindata: list[float]) -> datetime | None:
                 is_currently_raining = True
         elif is_currently_raining:
             # Found the first gap — rain stopped at last_rain_idx
+            assert last_rain_idx is not None
             return now + timedelta(minutes=5 * last_rain_idx)
 
     # Rain continues through the full 2h window

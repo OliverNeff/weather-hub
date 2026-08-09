@@ -200,7 +200,7 @@ def _current_precip_from_minutely(minutely_15: dict[str, Any], now: datetime) ->
     return None
 
 
-def _build_precip_result() -> dict[str, bool | float | None]:
+def _build_precip_result() -> dict[str, Any]:
     return {
         "precipitation_next_30m": None,
         "precipitation_amount_next_30m": None,
@@ -216,7 +216,7 @@ def _build_precip_result() -> dict[str, bool | float | None]:
 
 def _parse_minutely_precipitation(
     minutely_15: dict[str, Any], hourly: dict[str, Any], now: datetime
-) -> dict[str, bool | float | None]:
+) -> dict[str, Any]:
     """Build 30m / 1h / 2h forecast fields from minutely_15 precipitation data.
 
     Falls back to hourly data if minutely_15 is not available.
