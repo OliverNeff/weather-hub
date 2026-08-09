@@ -516,17 +516,59 @@ class TestFetchObservation:
 
         def mock_all_stations():
             return [
-                {"id": "14043", "lat": 50.38, "lon": 7.53, "name": "Mülheim", "distance": 5.0, "coverage": 1},
-                {"id": "13689", "lat": 50.43, "lon": 7.66, "name": "Höhr", "distance": 10.3, "coverage": 1},
-                {"id": "00161", "lat": 50.42, "lon": 7.42, "name": "Andernach", "distance": 14.1, "coverage": 4},
+                {
+                    "id": "14043",
+                    "lat": 50.38,
+                    "lon": 7.53,
+                    "name": "Mülheim",
+                    "distance": 5.0,
+                    "coverage": 1,
+                },
+                {
+                    "id": "13689",
+                    "lat": 50.43,
+                    "lon": 7.66,
+                    "name": "Höhr",
+                    "distance": 10.3,
+                    "coverage": 1,
+                },
+                {
+                    "id": "00161",
+                    "lat": 50.42,
+                    "lon": 7.42,
+                    "name": "Andernach",
+                    "distance": 14.1,
+                    "coverage": 4,
+                },
             ]
 
         def mock_find_nearest(stations, lat, lon, count):
             # Return all candidates within range, distance-sorted (what the impl does)
             return [
-                {"id": "14043", "lat": 50.38, "lon": 7.53, "name": "Mülheim", "distance": 5.0, "coverage": 1},
-                {"id": "13689", "lat": 50.43, "lon": 7.66, "name": "Höhr", "distance": 10.3, "coverage": 1},
-                {"id": "00161", "lat": 50.42, "lon": 7.42, "name": "Andernach", "distance": 14.1, "coverage": 4},
+                {
+                    "id": "14043",
+                    "lat": 50.38,
+                    "lon": 7.53,
+                    "name": "Mülheim",
+                    "distance": 5.0,
+                    "coverage": 1,
+                },
+                {
+                    "id": "13689",
+                    "lat": 50.43,
+                    "lon": 7.66,
+                    "name": "Höhr",
+                    "distance": 10.3,
+                    "coverage": 1,
+                },
+                {
+                    "id": "00161",
+                    "lat": 50.42,
+                    "lon": 7.42,
+                    "name": "Andernach",
+                    "distance": 14.1,
+                    "coverage": 4,
+                },
             ]
 
         # Precipitation: available from all 3 stations
@@ -575,14 +617,42 @@ class TestFetchObservation:
 
         def mock_all_stations():
             return [
-                {"id": "PRECIP1", "lat": 50.0, "lon": 9.0, "name": "Precip1", "distance": 3.0, "coverage": 1},
-                {"id": "FULL1", "lat": 50.5, "lon": 9.5, "name": "Full1", "distance": 15.0, "coverage": 4},
+                {
+                    "id": "PRECIP1",
+                    "lat": 50.0,
+                    "lon": 9.0,
+                    "name": "Precip1",
+                    "distance": 3.0,
+                    "coverage": 1,
+                },
+                {
+                    "id": "FULL1",
+                    "lat": 50.5,
+                    "lon": 9.5,
+                    "name": "Full1",
+                    "distance": 15.0,
+                    "coverage": 4,
+                },
             ]
 
         def mock_find_nearest(stations, lat, lon, count):
             return [
-                {"id": "PRECIP1", "lat": 50.0, "lon": 9.0, "name": "Precip1", "distance": 3.0, "coverage": 1},
-                {"id": "FULL1", "lat": 50.5, "lon": 9.5, "name": "Full1", "distance": 15.0, "coverage": 4},
+                {
+                    "id": "PRECIP1",
+                    "lat": 50.0,
+                    "lon": 9.0,
+                    "name": "Precip1",
+                    "distance": 3.0,
+                    "coverage": 1,
+                },
+                {
+                    "id": "FULL1",
+                    "lat": 50.5,
+                    "lon": 9.5,
+                    "name": "Full1",
+                    "distance": 15.0,
+                    "coverage": 4,
+                },
             ]
 
         def mock_get_stations_for_param(pk):

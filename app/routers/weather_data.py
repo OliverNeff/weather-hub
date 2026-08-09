@@ -205,8 +205,12 @@ def _compute_status(wd: WeatherData) -> str | None:
 
 @router.get("", response_model=WeatherData, responses={200: {"model": WeatherData}})
 async def get_weather_data(
-    lat: float = Query(..., description="Latitude of the location (decimal degrees)", ge=-90, le=90),
-    lon: float = Query(..., description="Longitude of the location (decimal degrees)", ge=-180, le=180),
+    lat: float = Query(
+        ..., description="Latitude of the location (decimal degrees)", ge=-90, le=90
+    ),
+    lon: float = Query(
+        ..., description="Longitude of the location (decimal degrees)", ge=-180, le=180
+    ),
 ) -> WeatherData:
     """Current weather and short-term precipitation forecast.
 

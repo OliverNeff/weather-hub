@@ -60,7 +60,12 @@ class MQTTClient:
             return
         await self._client.publish(topic, payload, retain=retain)
         tag = " (retained)" if retain else ""
-        logger.info("mqtt: published to %s (%d fields)%s", topic, len(payload) if isinstance(payload, dict) else "?", tag)
+        logger.info(
+            "mqtt: published to %s (%d fields)%s",
+            topic,
+            len(payload) if isinstance(payload, dict) else "?",
+            tag,
+        )
 
     @property
     def is_connected(self) -> bool:

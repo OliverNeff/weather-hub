@@ -496,7 +496,9 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
             available_ids = param_id_lookup[pk]
             pk_candidates = [s for s in candidates if s["id"] in available_ids]
             if pk_candidates:
-                futs.append(pool.submit(_fetch_param_from_stations, pk, pk_candidates[:_NUM_STATIONS]))
+                futs.append(
+                    pool.submit(_fetch_param_from_stations, pk, pk_candidates[:_NUM_STATIONS])
+                )
 
         for f in futs:
             all_results.extend(f.result())
@@ -553,10 +555,7 @@ def _fetch_observation(lat: float, lon: float) -> dict[str, Any]:
         logger.info(
             "dwd: used %d station(s) for observation: %s",
             len(trimmed),
-            ", ".join(
-                f"{v['station_name']}({v.get('distance', 0):.1f}km)"
-                for v in trimmed
-            ),
+            ", ".join(f"{v['station_name']}({v.get('distance', 0):.1f}km)" for v in trimmed),
         )
 
     all_stations = trimmed
@@ -694,9 +693,7 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
     return forecast
 
 
-def _precipitation_stops_at(
-    precip: pl.DataFrame, now: datetime
-) -> datetime | None:
+def _precipitation_stops_at(precip: pl.DataFrame, now: datetime) -> datetime | None:
     """Find when current rain stops from MosMix hourly forecast.
 
     Scans forward from now and finds the first gap (rain → no rain).
