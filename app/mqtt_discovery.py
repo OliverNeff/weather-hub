@@ -1,6 +1,5 @@
 """Home Assistant MQTT Discovery configuration for Weather Hub."""
 
-import json
 import logging
 import os
 from typing import Any
