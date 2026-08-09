@@ -33,21 +33,28 @@ def _base_config(state_topic: str, unique_id: str, name: str) -> dict[str, Any]:
     }
 
 
+def _clean(d: dict[str, Any]) -> dict[str, Any]:
+    """Remove None values from config dict. HA rejects discovery payloads with null fields."""
+    return {k: v for k, v in d.items() if v is not None}
+
+
 def build_weather_config(state_topic: str) -> tuple[str, dict[str, Any]]:
     """Weather entity — uses HA weather component attributes."""
     return (
         f"{DISCOVERY_PREFIX}/weather/weather-hub/config",
-        {
-            **_base_config(state_topic, "weather-hub", "Weather Hub"),
-            "device_class": "weather",
-            "value_template": "{{ value_json.status }}",
-            "temperature_attribute": "temperature",
-            "wind_speed_attribute": "wind_speed",
-            "precipitation_intensity_attribute": "precipitation_intensity",
-            "uv_index_attribute": "uv_index",
-            "cloud_cover_attribute": "cloud_cover",
-            "attributes_template": "{{ value_json | tojson }}",
-        },
+        _clean(
+            {
+                **_base_config(state_topic, "weather-hub", "Weather Hub"),
+                "device_class": "weather",
+                "value_template": "{{ value_json.status }}",
+                "temperature_attribute": "temperature",
+                "wind_speed_attribute": "wind_speed",
+                "precipitation_intensity_attribute": "precipitation_intensity",
+                "uv_index_attribute": "uv_index",
+                "cloud_cover_attribute": "cloud_cover",
+                "attributes_template": "{{ value_json | tojson }}",
+            }
+        ),
     )
 
 
@@ -64,13 +71,15 @@ def build_sensor_config(
     st = _state_topic()
     return (
         f"{DISCOVERY_PREFIX}/sensor/weather-hub/{entity_id}/config",
-        {
-            **_base_config(st, f"weather-hub-{entity_id}", name),
-            "value_template": f"{{{{ value_json.{field} if value_json.{field} is not none else 'unknown' }}}}",
-            "unit_of_measurement": unit_of_measurement,
-            "device_class": device_class,
-            "state_class": state_class,
-        },
+        _clean(
+            {
+                **_base_config(st, f"weather-hub-{entity_id}", name),
+                "value_template": f"{{{{ value_json.{field} if value_json.{field} is not none else 'unknown' }}}}",
+                "unit_of_measurement": unit_of_measurement,
+                "device_class": device_class,
+                "state_class": state_class,
+            }
+        ),
     )
 
 
@@ -85,11 +94,13 @@ def build_binary_sensor_config(
     st = _state_topic()
     return (
         f"{DISCOVERY_PREFIX}/binary_sensor/weather-hub/{entity_id}/config",
-        {
-            **_base_config(st, f"weather-hub-{entity_id}", name),
-            "value_template": f"{{{{ 'ON' if value_json.{field} else 'OFF' }}}}",
-            "device_class": device_class,
-        },
+        _clean(
+            {
+                **_base_config(st, f"weather-hub-{entity_id}", name),
+                "value_template": f"{{{{ 'ON' if value_json.{field} else 'OFF' }}}}",
+                "device_class": device_class,
+            }
+        ),
     )
 
 
