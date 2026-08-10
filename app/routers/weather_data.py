@@ -103,13 +103,13 @@ def _pick_by_source_order(
     order: tuple[str, ...],
 ) -> float | None:
     """Return the first non-None value for *field* from adapters in source priority order."""
-    mapping = {"dwd": dwd, "buienradar": buienradar, "openmeteo": openmeteo}
+    mapping: dict[str, WeatherData] = {"dwd": dwd, "buienradar": buienradar, "openmeteo": openmeteo}
     for source in order:
         wd = mapping.get(source)
         if wd is not None:
             val = getattr(wd, field)
             if val is not None:
-                return val
+                return val  # type: ignore[no-any-return]
     return None
 
 
