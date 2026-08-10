@@ -71,13 +71,21 @@ The router fetches all 3 adapters in parallel, then merges:
 
 | Fields | Strategy | Why |
 |---|---|---|
-| Wind speed/gust | `max()` across all adapters | Over-reporting is safer |
+| Wind speed/gust | DWD > Open-Meteo > Buienradar | DWD = station measurement; Open-Meteo = model (over-reports gusts); Buienradar = NL-only |
 | Precipitation rate + 30m/1h/2h | `max()` across all adapters | Missing rain is worse than over-reporting |
 | Feels like | Open-Meteo first, then freshest | Open-Meteo's apparent_temperature is most reliable |
 | Temperature | Freshest source (newest timestamp first) | Most recent data is most accurate |
 | UV index | Freshest source | Open-Meteo provides accurate real-time UV; DWD's is rough |
 | Sunrise/sunset/sun elevation | Freshest source | Only Open-Meteo provides these |
 | Stations | All stations from all adapters | Shows which sources contributed |
+
+### No-rain guard (`weather_data.py`)
+
+When no adapter reports current rain (`precipitation_intensity > 0`), all
+precipitation forecast fields (`precipitation_next_*`, `precipitation_stops_at`)
+are set to `None`. Without an active rain session, forecast values are
+meaningless. The adapter helpers (`_precipitation_stops_at`) have a 2h guard
+that prevents far-future rain events from leaking through.
 
 ### DWD caching
 
