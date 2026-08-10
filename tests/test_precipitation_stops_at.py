@@ -5,9 +5,9 @@ from datetime import datetime, timedelta, timezone
 import polars as pl
 
 from app.adapter.buinradar import _calculate_precipitation_stops_at
-from app.adapter.openmeteo import _precipitation_stops_at as om_stops_at, _precip_stops_hourly
+from app.adapter.openmeteo import _precip_stops_hourly
+from app.adapter.openmeteo import _precipitation_stops_at as om_stops_at
 from app.adapter.wetterdienst_dwd import _precipitation_stops_at as dwd_stops_at
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,7 +159,10 @@ class TestDwdStopsAt:
         assert dwd_stops_at(df, now) is None
 
     def test_empty_df(self):
-        assert dwd_stops_at(pl.DataFrame({"date": [], "value": []}), datetime.now(timezone.utc)) is None
+        assert (
+            dwd_stops_at(pl.DataFrame({"date": [], "value": []}), datetime.now(timezone.utc))
+            is None
+        )
 
     def test_rain_only_past(self):
         """Rain was yesterday, not today."""
