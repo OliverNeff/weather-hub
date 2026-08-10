@@ -71,7 +71,7 @@ The router fetches all 3 adapters in parallel, then merges:
 
 | Fields | Strategy | Why |
 |---|---|---|
-| Wind speed/gust | DWD > Open-Meteo > Buienradar | DWD = station measurement; Open-Meteo = model (over-reports gusts); Buienradar = NL-only |
+| Wind speed/gust | DWD > Open-Meteo > Buienradar | DWD = station measurement (if <30min stale); fallback Open-Meteo model; Buienradar NL-only |
 | Precipitation rate + 30m/1h/2h | `max()` across all adapters | Missing rain is worse than over-reporting |
 | Feels like | Same adapter as temperature, then freshest | Keeps temperature and feels_like consistent |
 | Temperature | Freshest source (newest timestamp first) | Most recent data is most accurate |

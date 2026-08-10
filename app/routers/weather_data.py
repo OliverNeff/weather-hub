@@ -117,11 +117,14 @@ def _pick_by_source_order(
         if wd is not None:
             val = getattr(wd, field)
             if val is not None:
-                # Check freshness: skip stale data
+                # Check freshness: skip stale data by checking the
+                # newest timestamp across all stations for this adapter
                 if wd.stations:
-                    t = wd.stations[0].time
-                    if t is not None and t < cutoff:
-                        continue
+                    times = [s.time for s in wd.stations if s.time is not None]
+                    if times:
+                        freshest = max(times)
+                        if freshest < cutoff:
+                            continue
                 return val  # type: ignore[no-any-return]
     return None
 

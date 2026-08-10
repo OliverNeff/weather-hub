@@ -256,7 +256,7 @@ Nachdem alle Datenanbieter ihre Ergebnisse geliefert haben, fusioniert der Route
 
 | Felder | Strategie | Begründung |
 |---|---|---|
-| Windgeschwindigkeit / Böen | DWD > Open-Meteo > Buienradar | DWD = echte Stationsdaten; Open-Meteo = Modell (Böen oft übertrieben); Buienradar = NL-only |
+| Windgeschwindigkeit / Böen | DWD > Open-Meteo > Buienradar | DWD = echte Stationsdaten (frisch <30min); sonst Open-Meteo (Modell); Buienradar = NL-only |
 | Niederschlag + Vorhersage | `max()` ueber alle Anbieter | Verpasster Regen ist schlimmer als ueberberichterstattung |
 | Gefuehlte Temperatur | Gleicher Anbieter wie Temperatur | Haeelt Temperatur und gefuehlte Temperatur konsistent |
 | Temperatur | Frischeste Quelle (neuster Zeitstempel zuerst) | Neueste Daten sind am genauesten |
