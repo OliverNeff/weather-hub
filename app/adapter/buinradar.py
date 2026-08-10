@@ -151,7 +151,10 @@ def _calculate_precipitation_stops_at(raindata: list[float]) -> datetime | None:
 
     Scans forward from now and finds the first gap (rain → no rain).
     Returns the timestamp of the last 5-min interval with rain > 0
-    before that gap, or None if no rain data.
+    before that gap.
+
+    If rain continues through the full 2h window, returns None so the
+    router falls back to a wider- horizon adapter (Open-Meteo, DWD).
     """
     if not raindata:
         return None
@@ -170,8 +173,6 @@ def _calculate_precipitation_stops_at(raindata: list[float]) -> datetime | None:
             assert last_rain_idx is not None
             return now + timedelta(minutes=5 * last_rain_idx)
 
-    # Rain continues through the full 2h window
-    if is_currently_raining and last_rain_idx is not None:
-        return now + timedelta(minutes=5 * last_rain_idx)
-
+    # Rain continues through the full 2h window — defer to a wider
+    # horizon adapter (Open-Meteo 24h, DWD 10 days).
     return None

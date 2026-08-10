@@ -345,7 +345,8 @@ async def test_scenario_only_openmeteo_available(client):
 
 @pytest.mark.asyncio
 async def test_scenario_rain_later(client):
-    """No rain now, but forecast shows rain in the 1h window."""
+    """No rain now — forecast fields are cleared to None.
+    Without current rain, there's no active rain session to report."""
     dwd = _wd(
         temperature=20.0,
         precipitation_intensity=0.0,
@@ -367,9 +368,10 @@ async def test_scenario_rain_later(client):
         data = resp.json()
         assert data["precipitation_now"] is False
         assert data["status"] == "partlycloudy"
-        assert data["precipitation_next_30m"] is False
-        assert data["precipitation_next_1h"] is True
-        assert data["precipitation_amount_next_1h"] == 3.5
+        # No current rain -> all forecast fields cleared
+        assert data["precipitation_next_30m"] is None
+        assert data["precipitation_next_1h"] is None
+        assert data["precipitation_amount_next_1h"] is None
 
 
 # ---------------------------------------------------------------------------
