@@ -101,14 +101,27 @@ def _pick_by_source_order(
     openmeteo: WeatherData,
     field: str,
     order: tuple[str, ...],
+    stale_minutes: float = 30.0,
 ) -> float | None:
-    """Return the first non-None value for *field* from adapters in source priority order."""
+    """Return the first non-None value for *field* from adapters in source priority order.
+
+    If the preferred adapter's data is older than *stale_minutes*, skip to the next.
+    This avoids stale station snapshots (e.g. DWD 10-min intervals can be hours old).
+    """
     mapping: dict[str, WeatherData] = {"dwd": dwd, "buienradar": buienradar, "openmeteo": openmeteo}
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=stale_minutes)
+
     for source in order:
         wd = mapping.get(source)
         if wd is not None:
             val = getattr(wd, field)
             if val is not None:
+                # Check freshness: skip stale data
+                if wd.stations:
+                    t = wd.stations[0].time
+                    if t is not None and t < cutoff:
+                        continue
                 return val  # type: ignore[no-any-return]
     return None
 

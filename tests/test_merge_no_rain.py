@@ -179,3 +179,13 @@ class TestPickBySourceOrder:
         om = _wd_single("wind_speed", None, "openmeteo")
         order = ("dwd", "openmeteo", "buienradar")
         assert _pick_by_source_order(dwd, bu, om, "wind_speed", order) is None
+
+    def test_stale_dwd_falls_back_to_freshest(self):
+        """When DWD data is older than 30 min, skip to next source."""
+        old_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        dwd = _wd_single("wind_speed", 5.0, "dwd")
+        dwd.stations[0].time = old_time
+        bu = _wd_single("wind_speed", 12.0, "buienradar")
+        om = _wd_single("wind_speed", 8.0, "openmeteo")
+        order = ("dwd", "openmeteo", "buienradar")
+        assert _pick_by_source_order(dwd, bu, om, "wind_speed", order) == 8.0
