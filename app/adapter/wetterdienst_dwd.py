@@ -696,11 +696,21 @@ def _process_forecast_df(vals_df: pl.DataFrame, now: datetime) -> dict[str, Any]
 def _precipitation_stops_at(precip: pl.DataFrame, now: datetime) -> datetime | None:
     """Find when current rain stops from MosMix hourly forecast.
 
-    Scans forward from now and finds the first gap (rain → no rain).
-    Returns the datetime of the last hourly entry with precipitation > 0
-    before that gap, or None if no rain data.
+    Only returns a time if rain is expected in the near term (within the
+    2h forecast window).  If the first rain event is days away, there is
+    no current rain session to report.
     """
     if len(precip) == 0:
+        return None
+
+    # Check for rain in the next 2 hours — the same horizon as the
+    # precipitation_next_2h forecast field.
+    near = precip.filter(
+        (precip["date"] >= now)
+        & (precip["date"] < now + timedelta(hours=2))
+        & (precip["value"] > 0)
+    )
+    if len(near) == 0:
         return None
 
     rows = precip.sort("date").iter_rows(named=True)

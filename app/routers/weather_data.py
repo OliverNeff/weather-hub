@@ -267,12 +267,25 @@ async def get_weather_data(
     if precip_intensity is not None:
         merged.precipitation_now = precip_intensity > 0
 
-    # precipitation_stops_at: prefer most granular source.
-    # Buienradar (5min) > Open-Meteo (15min/hourly) > DWD MosMix (1h).
-    stops_at = getattr(buienradar, "precipitation_stops_at", None)
-    if stops_at is None:
-        stops_at, _ = _pick_first(fresh, "precipitation_stops_at")
-    merged.precipitation_stops_at = stops_at
+    # If there's no current rain, forecast fields are meaningless — clear them.
+    if merged.precipitation_now is not True:
+        merged.precipitation_next_30m = None
+        merged.precipitation_amount_next_30m = None
+        merged.precipitation_intensity_next_30m = None
+        merged.precipitation_next_1h = None
+        merged.precipitation_amount_next_1h = None
+        merged.precipitation_intensity_next_1h = None
+        merged.precipitation_next_2h = None
+        merged.precipitation_amount_next_2h = None
+        merged.precipitation_intensity_next_2h = None
+        merged.precipitation_stops_at = None
+    else:
+        # precipitation_stops_at: prefer most granular source.
+        # Buienradar (5min) > Open-Meteo (15min/hourly) > DWD MosMix (1h).
+        stops_at = getattr(buienradar, "precipitation_stops_at", None)
+        if stops_at is None:
+            stops_at, _ = _pick_first(fresh, "precipitation_stops_at")
+        merged.precipitation_stops_at = stops_at
 
     # Derive Home Assistant-compatible status from merged data.
     merged.status = _compute_status(merged)

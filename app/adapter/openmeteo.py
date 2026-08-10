@@ -319,6 +319,7 @@ def _precipitation_stops_at(
 
     Scans forward from now and finds the first gap (rain → no rain).
     Returns the timestamp of the last rainy interval before that gap.
+    Returns None if there is no current rain session.
 
     Uses minutely_15 data (15min resolution, ~1h) as primary source.
     Falls back to hourly data (24h) when minutely_15 is unavailable or
@@ -355,18 +356,35 @@ def _precipitation_stops_at(
         if hourly_stop is not None:
             return hourly_stop
 
-    # Check hourly for current rain session stop
-    if not is_currently_raining:
-        return _precip_stops_hourly(hourly, now)
-
     return last_rain_dt
 
 
 def _precip_stops_hourly(hourly: dict[str, Any], now: datetime) -> datetime | None:
-    """Find when current rain stops from hourly data."""
+    """Find when current rain stops from hourly data.
+
+    Only returns a time if rain is expected in the near term (within the
+    2h forecast window).  If the first rain event is hours away, there is
+    no current rain session to report.
+    """
     times = hourly.get("time", [])
     precip = hourly.get("precipitation", [])
     if not times or not precip:
+        return None
+
+    # Guard: only scan hourly if there's rain in the next 2 hours.
+    has_near_rain = False
+    for i, ts in enumerate(times):
+        dt = _parse_iso(ts)
+        if dt is None or dt < now:
+            continue
+        if dt >= now + timedelta(hours=2):
+            break
+        val = precip[i]
+        if val is not None and val > 0:
+            has_near_rain = True
+            break
+
+    if not has_near_rain:
         return None
 
     last_rain_dt: datetime | None = None
