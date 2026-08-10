@@ -7,7 +7,7 @@ import pytest
 
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
-from app.routers.weather_data import get_weather_data, _pick_by_source_order
+from app.routers.weather_data import _pick_by_source_order, get_weather_data
 
 
 def _wd(
@@ -44,9 +44,9 @@ def _wd(
 
 
 @pytest.mark.asyncio
-async def test_no_rain_clears_all_forecast_fields():
-    """When no adapter reports current rain, all precipitation forecast
-    fields must be None — even if an adapter returned a far-future timestamp."""
+async def test_no_rain_clears_stops_at():
+    """When no adapter reports current rain, precipitation_stops_at must be None.
+    Forecast bool/amount/intensity fields are kept as-is from adapter data."""
     stops_far = datetime.now(timezone.utc) + timedelta(days=7)
     dwd = _wd(
         precipitation_next_30m=True,
@@ -81,16 +81,14 @@ async def test_no_rain_clears_all_forecast_fields():
 
     # No adapter reported precipitation_intensity, so precipitation_now is None
     assert result.precipitation_now is not True
-    assert result.precipitation_next_30m is None
-    assert result.precipitation_amount_next_30m is None
-    assert result.precipitation_intensity_next_30m is None
-    assert result.precipitation_next_1h is None
-    assert result.precipitation_amount_next_1h is None
-    assert result.precipitation_intensity_next_1h is None
-    assert result.precipitation_next_2h is None
-    assert result.precipitation_amount_next_2h is None
-    assert result.precipitation_intensity_next_2h is None
+    # stops_at cleared (meaningless without active rain)
     assert result.precipitation_stops_at is None
+    # Forecast fields preserved from adapter data
+    assert result.precipitation_next_30m is True
+    assert result.precipitation_amount_next_30m == 5.0
+    assert result.precipitation_next_1h is True
+    assert result.precipitation_amount_next_1h == 10.0
+    assert result.precipitation_next_2h is True
 
 
 @pytest.mark.asyncio
@@ -144,7 +142,9 @@ async def test_raining_preserves_forecast_fields():
 def _wd_single(field: str, value: float | None, source: str) -> WeatherData:
     wd = WeatherData(**{field: value})
     wd.stations.append(
-        WeatherStation(source=source, name="test", lat=50.0, lon=9.0, time=datetime.now(timezone.utc))
+        WeatherStation(
+            source=source, name="test", lat=50.0, lon=9.0, time=datetime.now(timezone.utc)
+        )
     )
     return wd
 

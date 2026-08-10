@@ -26,11 +26,11 @@ class WeatherData(BaseModel):
     # --- Wind ---
     wind_speed: float | None = Field(
         default=None,
-        description="Current wind speed in m/s (max across providers)",
+        description="Current wind speed in m/s (DWD > Open-Meteo > Buienradar)",
     )
     wind_gust: float | None = Field(
         default=None,
-        description="Maximum wind gust in m/s (max across providers)",
+        description="Maximum wind gust in m/s (DWD > Open-Meteo > Buienradar)",
     )
 
     # --- Precipitation (current) ---

@@ -256,13 +256,15 @@ Nachdem alle Datenanbieter ihre Ergebnisse geliefert haben, fusioniert der Route
 
 | Felder | Strategie | Begründung |
 |---|---|---|
-| Windgeschwindigkeit / Böen | `max()` ueber alle Anbieter | Ueberberichterstattung ist sicherer als Unterberichterstattung |
+| Windgeschwindigkeit / Böen | DWD > Open-Meteo > Buienradar | DWD = echte Stationsdaten; Open-Meteo = Modell (Böen oft übertrieben); Buienradar = NL-only |
 | Niederschlag + Vorhersage | `max()` ueber alle Anbieter | Verpasster Regen ist schlimmer als ueberberichterstattung |
 | Gefuehlte Temperatur | Gleicher Anbieter wie Temperatur | Haeelt Temperatur und gefuehlte Temperatur konsistent |
 | Temperatur | Frischeste Quelle (neuster Zeitstempel zuerst) | Neueste Daten sind am genauesten |
 | UV-Index | Frischeste Quelle | Open-Meteo liefert genaue Echtzeit-UV; DWD ist eine grobe Schaeztung |
 | Sonnenauf-/untergang / Sonnenhoehe | Frischeste Quelle | Nur Open-Meteo liefert diese Daten |
 | Stationen | Alle Stationen aller Anbieter mit Daten | Zeigt, welche Quellen mitgewirkt haben |
+
+Wenn aktuell kein Niederschlag gemessen wird, wird `precipitation_stops_at` auf `null` gesetzt — ohne aktive Regen-Phase ist ein "Endezeitpunkt" nicht sinnvoll. Die Vorhersage-Felder (`precipitation_next_*`) bleiben unverändert vom Adapter: `false` bedeutet "kein Regen erwartet" (Daten verfügbar), `null` bedeutet "keine Daten".
 
 ## Home Assistant Status-Werte
 
@@ -285,4 +287,4 @@ Das `status`-Feld mappt auf die vordefinierten Werte der HA Weather Integration:
 | `windy` | Windgeschwindigkeit >=10 m/s |
 | `windy-variant` | Windgeschwindigkeit >=15 m/s |
 
-Die Berechnung nutzt Daten aller drei Anbieter: WMO-Codes aus Open-Meteo fuer nicht-messbare Bedingungen (Nebel, Schnee, Gewitter), gemergte Maxwerte fuer Wind und Niederschlag (alle Adapter), und Sonnenhoehe fuer Tag/Nacht-Erkennung.
+Die Berechnung nutzt Daten aller drei Anbieter: WMO-Codes aus Open-Meteo fuer nicht-messbare Bedingungen (Nebel, Schnee, Gewitter), gemergte Maxwerte fuer Niederschlag (alle Adapter), Wind aus DWD (Stationenprioritaet), und Sonnenhoehe fuer Tag/Nacht-Erkennung.

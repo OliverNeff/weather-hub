@@ -73,7 +73,7 @@ The router fetches all 3 adapters in parallel, then merges:
 |---|---|---|
 | Wind speed/gust | DWD > Open-Meteo > Buienradar | DWD = station measurement; Open-Meteo = model (over-reports gusts); Buienradar = NL-only |
 | Precipitation rate + 30m/1h/2h | `max()` across all adapters | Missing rain is worse than over-reporting |
-| Feels like | Open-Meteo first, then freshest | Open-Meteo's apparent_temperature is most reliable |
+| Feels like | Same adapter as temperature, then freshest | Keeps temperature and feels_like consistent |
 | Temperature | Freshest source (newest timestamp first) | Most recent data is most accurate |
 | UV index | Freshest source | Open-Meteo provides accurate real-time UV; DWD's is rough |
 | Sunrise/sunset/sun elevation | Freshest source | Only Open-Meteo provides these |
@@ -81,10 +81,11 @@ The router fetches all 3 adapters in parallel, then merges:
 
 ### No-rain guard (`weather_data.py`)
 
-When no adapter reports current rain (`precipitation_intensity > 0`), all
-precipitation forecast fields (`precipitation_next_*`, `precipitation_stops_at`)
-are set to `None`. Without an active rain session, forecast values are
-meaningless. The adapter helpers (`_precipitation_stops_at`) have a 2h guard
+When no adapter reports current rain (`precipitation_intensity > 0`),
+`precipitation_stops_at` is set to `None` — without an active rain session the
+"stop time" is meaningless. Forecast bool/amount/intensity fields are preserved
+from adapter data: `false` means "no rain expected" (data available), `null`
+means "no data". The adapter helpers (`_precipitation_stops_at`) have a 2h guard
 that prevents far-future rain events from leaking through.
 
 ### DWD caching
@@ -107,11 +108,11 @@ When `MQTT_LAT` and `MQTT_LON` are set, a background timer fetches weather data 
 
 On startup with a real broker, publishes Home Assistant MQTT Discovery configs with `retain=true`. Skipped in stub mode.
 
-- `discover_all(client)` — entry point, called from lifespan, publishes 13 entities
+- `discover_all(client)` — entry point, called from lifespan, publishes 24 entities
 - `build_weather_config()` — weather entity with `temperature_attribute`, `wind_speed_attribute`, `uv_index_attribute`, `precipitation_intensity_attribute`, `cloud_cover_attribute`
 - `build_sensor_config()` / `build_binary_sensor_config()` — generic sensor/binary sensor builders
 - `DISCOVERY_PREFIX` configurable via `HA_DISCOVERY_PREFIX` (default: `homeassistant`)
-- Entities: 1 weather + 7 sensors + 4 binary sensors, all under device "Weather Hub"
+- Entities: 1 weather + 19 sensors + 4 binary sensors, all under device "Weather Hub"
 
 ## Windows SSL Configuration
 

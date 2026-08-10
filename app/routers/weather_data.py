@@ -56,8 +56,8 @@ _MERGEABLE_FIELDS = [
     "precipitation_stops_at",
 ]
 
-# Wind + precipitation: take the max across all adapters.
-# Missing rain or under-reported wind is worse than over-reporting it.
+# Precipitation: take the max across all adapters.
+# Missing rain is worse than over-reporting it.
 _CONSERVATIVE_FIELDS = {
     "precipitation_intensity",
     "precipitation_next_30m",
@@ -143,7 +143,7 @@ def _compute_status(wd: WeatherData) -> str | None:
 
     Priority: precipitation > thunder > snow > wind > cloud > clear.
 
-    Uses merged values (max across adapters for wind/precip) plus
+    Uses merged values (max across adapters for precip, source priority for wind) plus
     Open-Meteo weather_code and cloud_cover for conditions not directly
     measurable (fog, snow, thunder, cloud cover).
 
@@ -193,7 +193,7 @@ def _compute_status(wd: WeatherData) -> str | None:
     if code in (51, 52, 53, 54, 55, 61, 63, 64, 80, 81, 82):
         return _STATUS_RAINY
 
-    # Wind (uses merged max across all adapters)
+    # Wind (source priority: DWD > Open-Meteo > Buienradar)
     if wind is not None and wind >= 15:
         return _STATUS_WINDY_VARIANT
     if wind is not None and wind >= 10:
@@ -239,7 +239,8 @@ async def get_weather_data(
 
     **Merge strategy**
 
-    - Wind / precipitation: maximum value across all providers
+    - Wind: source priority (DWD > Open-Meteo > Buienradar)
+    - Precipitation: maximum value across all providers
     - Temperature / feels-like: freshest measurement
     - UV / sun data: freshest source (Open-Meteo provides accurate UV)
     - Status: derived from merged data (Home Assistant compatible)
@@ -290,17 +291,11 @@ async def get_weather_data(
     if precip_intensity is not None:
         merged.precipitation_now = precip_intensity > 0
 
-    # If there's no current rain, forecast fields are meaningless — clear them.
+    # If there's no current rain, clear precipitation_stops_at (meaningless
+    # without an active rain session). Keep the forecast bool/amount/intensity
+    # fields as-is — they still reflect adapter data (false = "no rain expected",
+    # null = "no data available").
     if merged.precipitation_now is not True:
-        merged.precipitation_next_30m = None
-        merged.precipitation_amount_next_30m = None
-        merged.precipitation_intensity_next_30m = None
-        merged.precipitation_next_1h = None
-        merged.precipitation_amount_next_1h = None
-        merged.precipitation_intensity_next_1h = None
-        merged.precipitation_next_2h = None
-        merged.precipitation_amount_next_2h = None
-        merged.precipitation_intensity_next_2h = None
         merged.precipitation_stops_at = None
     else:
         # precipitation_stops_at: prefer most granular source.
