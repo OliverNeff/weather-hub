@@ -264,7 +264,7 @@ async def test_scenario_night_to_day_sunny(client):
 
 @pytest.mark.asyncio
 async def test_scenario_wind_picks_up(client):
-    """Wind goes from calm (DWD) to windy (Buienradar reports gusts)."""
+    """Wind prefers DWD station measurements over remote Buienradar."""
     dwd = _wd(wind_speed=3.0, wind_gust=5.0, source="dwd")
     bu = _wd(wind_speed=12.0, wind_gust=18.0, source="buienradar")
     om = _wd(wind_speed=8.0, source="openmeteo")
@@ -275,10 +275,10 @@ async def test_scenario_wind_picks_up(client):
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
-        # max() across adapters
-        assert data["wind_speed"] == 12.0
-        assert data["wind_gust"] == 18.0
-        assert data["status"] == "windy"
+        # DWD preferred over Buienradar (200km away) and Open-Meteo (model)
+        assert data["wind_speed"] == 3.0
+        assert data["wind_gust"] == 5.0
+        assert data["status"] is None
 
 
 # ---------------------------------------------------------------------------

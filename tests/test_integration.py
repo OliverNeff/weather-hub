@@ -204,6 +204,7 @@ async def test_all_adapters_failure_returns_empty(client):
 
 @pytest.mark.asyncio
 async def test_max_wind_speed_across_adapters(client):
+    """Wind fields prefer DWD > Open-Meteo > Buienradar (not max)."""
     dwd = _make_weather_data(wind_speed=5.0, source="dwd")
     bu = _make_weather_data(wind_speed=12.0, source="buienradar")
     om = _make_weather_data(wind_speed=3.0, source="openmeteo")
@@ -214,7 +215,7 @@ async def test_max_wind_speed_across_adapters(client):
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
-        assert data["wind_speed"] == 12.0
+        assert data["wind_speed"] == 5.0
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ import pytest
 
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
-from app.routers.weather_data import get_weather_data
+from app.routers.weather_data import get_weather_data, _pick_by_source_order
 
 
 def _wd(
@@ -134,3 +134,48 @@ async def test_raining_preserves_forecast_fields():
     assert result.precipitation_next_1h is True
     assert result.precipitation_amount_next_1h == 6.0
     assert result.precipitation_stops_at == stops_at
+
+
+# ---------------------------------------------------------------------------
+# _pick_by_source_order — wind prefers DWD over model data
+# ---------------------------------------------------------------------------
+
+
+def _wd_single(field: str, value: float | None, source: str) -> WeatherData:
+    wd = WeatherData(**{field: value})
+    wd.stations.append(
+        WeatherStation(source=source, name="test", lat=50.0, lon=9.0, time=datetime.now(timezone.utc))
+    )
+    return wd
+
+
+class TestPickBySourceOrder:
+    """Wind fields use source priority: DWD > Open-Meteo > Buienradar."""
+
+    def test_dwd_wins_over_others(self):
+        dwd = _wd_single("wind_speed", 5.0, "dwd")
+        bu = _wd_single("wind_speed", 12.0, "buienradar")
+        om = _wd_single("wind_speed", 3.0, "openmeteo")
+        order = ("dwd", "openmeteo", "buienradar")
+        assert _pick_by_source_order(dwd, bu, om, "wind_speed", order) == 5.0
+
+    def test_falls_back_to_openmeteo_when_dwd_missing(self):
+        dwd = _wd_single("wind_speed", None, "dwd")
+        bu = _wd_single("wind_speed", 12.0, "buienradar")
+        om = _wd_single("wind_speed", 8.0, "openmeteo")
+        order = ("dwd", "openmeteo", "buienradar")
+        assert _pick_by_source_order(dwd, bu, om, "wind_speed", order) == 8.0
+
+    def test_falls_back_to_buienradar_when_all_else_missing(self):
+        dwd = _wd_single("wind_gust", None, "dwd")
+        bu = _wd_single("wind_gust", 15.0, "buienradar")
+        om = _wd_single("wind_gust", None, "openmeteo")
+        order = ("dwd", "openmeteo", "buienradar")
+        assert _pick_by_source_order(dwd, bu, om, "wind_gust", order) == 15.0
+
+    def test_all_none_returns_none(self):
+        dwd = _wd_single("wind_speed", None, "dwd")
+        bu = _wd_single("wind_speed", None, "buienradar")
+        om = _wd_single("wind_speed", None, "openmeteo")
+        order = ("dwd", "openmeteo", "buienradar")
+        assert _pick_by_source_order(dwd, bu, om, "wind_speed", order) is None

@@ -59,8 +59,6 @@ _MERGEABLE_FIELDS = [
 # Wind + precipitation: take the max across all adapters.
 # Missing rain or under-reported wind is worse than over-reporting it.
 _CONSERVATIVE_FIELDS = {
-    "wind_speed",
-    "wind_gust",
     "precipitation_intensity",
     "precipitation_next_30m",
     "precipitation_amount_next_30m",
@@ -72,6 +70,10 @@ _CONSERVATIVE_FIELDS = {
     "precipitation_amount_next_2h",
     "precipitation_intensity_next_2h",
 }
+
+# Wind fields: prefer DWD (station measurements) > Open-Meteo (model) > Buienradar (NL-only).
+# Buienradar stations are NL-only and can be 200km+ away for DE coords.
+_WIND_ORDER = ("dwd", "openmeteo", "buienradar")
 
 
 def _pick_first(data: Sequence[WeatherData], field: str) -> tuple[Any, Any]:
@@ -91,6 +93,24 @@ def _pick_max(data: Sequence[WeatherData], field: str) -> float | None:
         if val is not None and (best is None or val > best):
             best = val
     return best
+
+
+def _pick_by_source_order(
+    dwd: WeatherData,
+    buienradar: WeatherData,
+    openmeteo: WeatherData,
+    field: str,
+    order: tuple[str, ...],
+) -> float | None:
+    """Return the first non-None value for *field* from adapters in source priority order."""
+    mapping = {"dwd": dwd, "buienradar": buienradar, "openmeteo": openmeteo}
+    for source in order:
+        wd = mapping.get(source)
+        if wd is not None:
+            val = getattr(wd, field)
+            if val is not None:
+                return val
+    return None
 
 
 def _sorted_by_freshness(data: Sequence[WeatherData]) -> list[WeatherData]:
@@ -247,8 +267,11 @@ async def get_weather_data(
     for field in _MERGEABLE_FIELDS:
         if field in ("time", "temperature", "feels_like", "precipitation_stops_at"):
             continue
-        if field in _CONSERVATIVE_FIELDS:
-            # Wind + precipitation: highest value across all adapters.
+        if field in ("wind_speed", "wind_gust"):
+            # Prefer DWD station measurements over model data.
+            val = _pick_by_source_order(dwd, buienradar, openmeteo, field, _WIND_ORDER)
+        elif field in _CONSERVATIVE_FIELDS:
+            # Precipitation: highest value across all adapters.
             val = _pick_max(all_data, field)
         else:
             # uv_index, sun data: freshest source.
