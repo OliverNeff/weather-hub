@@ -4,7 +4,6 @@ from jinja2 import Environment
 
 from app.mqtt_discovery import _wmo_to_condition_template
 
-
 template = Environment().from_string(_wmo_to_condition_template())
 
 
