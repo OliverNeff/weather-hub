@@ -164,6 +164,7 @@ async def discover_all(client: "MQTTClient | StubClient") -> None:
             "cloud-cover", "cloud_cover", name="Cloud Cover", unit_of_measurement="%"
         ),
         build_sensor_config("weather-code", "weather_code", name="Weather Code"),
+        build_sensor_config("status", "status", name="Status"),
         build_sensor_config("sunrise", "sunrise", name="Sunrise", device_class="timestamp"),
         build_sensor_config("sunset", "sunset", name="Sunset", device_class="timestamp"),
         build_sensor_config(
