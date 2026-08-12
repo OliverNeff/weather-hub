@@ -79,6 +79,14 @@ The router fetches all 3 adapters in parallel, then merges:
 | Sunrise/sunset/sun elevation | Freshest source | Only Open-Meteo provides these |
 | Stations | All stations from all adapters | Shows which sources contributed |
 
+### Status computation (`weather_data.py`)
+
+`status` is a Home Assistant-compatible condition string (`sunny`, `rainy`, `cloudy`, etc.) derived from all merged fields via `_compute_status()`. Priority: thunder > snow > measured precipitation > wind > fog > cloud. When WMO `weather_code` indicates rain/snow/thunder but measured values are 0, the model data takes precedence — it may reflect conditions not yet captured by sensors.
+
+The response has two weather status fields:
+- **`status`** — HA condition string (derived from all merged data)
+- **`weather_code`** — raw WMO code from Open-Meteo (0-99)
+
 ### No-rain guard (`weather_data.py`)
 
 When no adapter reports current rain (`precipitation_intensity > 0`),
@@ -108,11 +116,11 @@ When `MQTT_LAT` and `MQTT_LON` are set, a background timer fetches weather data 
 
 On startup with a real broker, publishes Home Assistant MQTT Discovery configs with `retain=true`. Skipped in stub mode.
 
-- `discover_all(client)` — entry point, called from lifespan, publishes 24 entities
+- `discover_all(client)` — entry point, called from lifespan, publishes 23 entities
 - `build_weather_config()` — weather entity with `temperature_attribute`, `wind_speed_attribute`, `uv_index_attribute`, `precipitation_intensity_attribute`, `cloud_cover_attribute`
 - `build_sensor_config()` / `build_binary_sensor_config()` — generic sensor/binary sensor builders
 - `DISCOVERY_PREFIX` configurable via `HA_DISCOVERY_PREFIX` (default: `homeassistant`)
-- Entities: 1 weather + 19 sensors + 4 binary sensors, all under device "Weather Hub"
+- Entities: 1 weather + 18 sensors + 4 binary sensors, all under device "Weather Hub"
 
 ## Windows SSL Configuration
 
