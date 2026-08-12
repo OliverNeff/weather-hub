@@ -138,32 +138,68 @@ async def _safe_fetch(func: Any, lat: float, lon: float) -> WeatherData:
         return WeatherData()
 
 
-def _wmo_to_condition(code: int | None) -> str | None:
-    """Map WMO weather code to Home Assistant condition string."""
-    mapping = {
-        0: "clear-night",
-        1: "clear-night",
-        2: "partlycloudy",
-        3: "cloudy",
-        45: "fog",
-        48: "fog",
-    }
-    if code in mapping:
-        return mapping[code]
-    if code in (51, 53, 55, 56, 61, 63, 65, 80, 81, 82):
-        return "rainy"
-    if code in (52, 54, 64):
-        return "pouring"
+def _compute_status(wd: WeatherData) -> str | None:
+    """Derive HA weather status from merged data.
+
+    Priority: thunder > snow > precip > wind > fog > cloud.
+    Uses all available fields (precip, wind, weather_code, cloud_cover)
+    so status is consistent with the merged values shown to the user.
+    """
+    precip = wd.precipitation_intensity
+    code = wd.weather_code
+    wind = wd.wind_speed
+    cloud = wd.cloud_cover
+    sun_el = wd.sun_elevation
+    is_night = sun_el is not None and sun_el < 0
+
+    # Thunder from WMO (no measured equivalent)
+    if code == 96:
+        return "lightning-rainy"
+    if code == 95:
+        return "lightning"
+    if code == 99:
+        return "lightning-rainy"
+
+    # Snow / freezing rain from WMO
     if code in (66, 67, 86):
         return "snowy-rainy"
     if code in (71, 73, 75, 77, 85, 87):
         return "snowy"
-    if code == 95:
-        return "lightning"
-    if code in (96, 99):
-        return "lightning-rainy"
+
+    # Measured precipitation
+    if precip is not None and precip > 5:
+        return "pouring"
+    if precip is not None and precip > 0:
+        return "rainy"
+
+    # WMO rain — model says rain but sensors report 0
+    if code in (51, 53, 55, 56, 61, 63, 65, 80, 81, 82):
+        return "rainy"
+
+    # Wind
+    if wind is not None and wind >= 15:
+        return "windy-variant"
+    if wind is not None and wind >= 10:
+        return "windy"
+
+    # Fog from WMO
+    if code in (45, 48):
+        return "fog"
+
+    # Clear / cloudy from WMO or cloud_cover
     if code is not None:
+        if code in (0, 1):
+            return "clear-night" if is_night else "sunny"
+        if code == 2:
+            return "partlycloudy"
         return "cloudy"
+    if cloud is not None:
+        if cloud <= 10:
+            return "clear-night" if is_night else "sunny"
+        if cloud <= 50:
+            return "partlycloudy"
+        return "cloudy"
+
     return None
 
 
@@ -250,7 +286,7 @@ async def get_weather_data(
         merged.precipitation_stops_at = stops_at
 
     # Derive HA weather status from WMO code.
-    merged.status = _wmo_to_condition(merged.weather_code)
+    merged.status = _compute_status(merged)
 
     # Collect stations from whichever adapter returned data.
     for wd in (dwd, buienradar, openmeteo):

@@ -110,7 +110,7 @@ async def test_scenario_rain_starting_radar_only(client):
 
 @pytest.mark.asyncio
 async def test_scenario_rain_stopping_station_only(client):
-    """DWD reports precip (delayed), but WMO code shows overcast."""
+    """DWD reports precip (delayed), radar and openmeteo show clear skies."""
     dwd = _wd(
         temperature=18.0,
         precipitation_intensity=2.0,
@@ -121,7 +121,7 @@ async def test_scenario_rain_stopping_station_only(client):
         source="buienradar",
     )
     om = _wd(
-        weather_code=3,
+        weather_code=0,
         sun_elevation=45.0,
         source="openmeteo",
     )
@@ -135,8 +135,8 @@ async def test_scenario_rain_stopping_station_only(client):
         # max() picks DWD's stale data — conservative (over-reporting is safer)
         assert data["precipitation_intensity"] == 2.0
         assert data["precipitation_now"] is True
-        # status derived from WMO code
-        assert data["status"] == "cloudy"
+        # Status: measured precip wins
+        assert data["status"] == "rainy"
 
 
 # ---------------------------------------------------------------------------
@@ -159,17 +159,16 @@ async def test_scenario_rain_stopped_all_clear(client):
         data = resp.json()
         assert data["precipitation_intensity"] == 0.0
         assert data["precipitation_now"] is False
-        # WMO 0 → clear-night (no sunny/clear-night distinction in WMO mapping)
-        assert data["status"] == "clear-night"
+        assert data["status"] == "sunny"
 
 
 # ---------------------------------------------------------------------------
-# Scenario: Cloudy to clear transition (weather_code changes)
+# Scenario: Cloudy to sunny transition (weather_code changes)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_scenario_cloudy_to_clear(client):
+async def test_scenario_cloudy_to_sunny(client):
     """Cloud cover drops, weather_code goes from 3 to 0."""
     dwd = _wd(temperature=22.0, source="dwd")
     bu = _wd(source="buienradar")
@@ -181,7 +180,7 @@ async def test_scenario_cloudy_to_clear(client):
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
-        assert data["status"] == "clear-night"
+        assert data["status"] == "sunny"
 
 
 @pytest.mark.asyncio
@@ -509,5 +508,4 @@ async def test_scenario_buienradar_too_far(client):
         data = resp.json()
         assert data["temperature"] == 20.0  # from DWD
         assert data["precipitation_intensity"] == 3.0  # from Buienradar radar
-        # No weather_code → no status
-        assert data["status"] is None
+        assert data["status"] == "rainy"

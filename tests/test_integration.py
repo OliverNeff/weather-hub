@@ -121,7 +121,7 @@ async def test_status_computed(client):
 
 
 @pytest.mark.asyncio
-async def test_status_clear_night_when_clear(client):
+async def test_status_sunny_when_clear(client):
     wd = _make_weather_data(
         temperature=25.0, weather_code=0, sun_elevation=45.0, source="openmeteo"
     )
@@ -138,7 +138,7 @@ async def test_status_clear_night_when_clear(client):
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
-        assert data["status"] == "clear-night"
+        assert data["status"] == "sunny"
 
 
 @pytest.mark.asyncio
