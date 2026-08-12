@@ -1,12 +1,14 @@
+"""Tests for _wmo_to_condition and merge helpers (_pick_first, _pick_max, _sorted_by_freshness)."""
+
 from datetime import datetime, timedelta, timezone
 
 from app.models.weather_data import WeatherData
 from app.models.weather_station import WeatherStation
 from app.routers.weather_data import (
-    _compute_status,
     _pick_first,
     _pick_max,
     _sorted_by_freshness,
+    _wmo_to_condition,
 )
 
 _now = datetime.now(timezone.utc)
@@ -15,245 +17,62 @@ _old = _now - timedelta(hours=48)
 
 
 # ---------------------------------------------------------------------------
-# _compute_status() — all 14 HA status values
+# _wmo_to_condition() — WMO code → HA condition string
 # ---------------------------------------------------------------------------
 
 
-def test_status_clear_night():
-    wd = WeatherData(weather_code=0, sun_elevation=-10)
-    assert _compute_status(wd) == "clear-night"
+def test_clear_night():
+    assert _wmo_to_condition(0) == "clear-night"
+    assert _wmo_to_condition(1) == "clear-night"
 
 
-def test_status_sunny_day():
-    wd = WeatherData(weather_code=0, sun_elevation=45)
-    assert _compute_status(wd) == "sunny"
+def test_partlycloudy():
+    assert _wmo_to_condition(2) == "partlycloudy"
 
 
-def test_status_sunny_code_1():
-    wd = WeatherData(weather_code=1, sun_elevation=20)
-    assert _compute_status(wd) == "sunny"
+def test_cloudy():
+    assert _wmo_to_condition(3) == "cloudy"
+    assert _wmo_to_condition(4) == "cloudy"
+    assert _wmo_to_condition(44) == "cloudy"
 
 
-def test_status_partlycloudy_code():
-    wd = WeatherData(weather_code=2)
-    assert _compute_status(wd) == "partlycloudy"
+def test_fog():
+    assert _wmo_to_condition(45) == "fog"
+    assert _wmo_to_condition(48) == "fog"
 
 
-def test_status_partlycloudy_cloud():
-    wd = WeatherData(cloud_cover=30)
-    assert _compute_status(wd) == "partlycloudy"
+def test_rainy():
+    for code in (51, 53, 55, 56, 61, 63, 65, 80, 81, 82):
+        assert _wmo_to_condition(code) == "rainy", f"failed for code {code}"
 
 
-def test_status_cloudy_code():
-    wd = WeatherData(weather_code=3)
-    assert _compute_status(wd) == "cloudy"
+def test_pouring():
+    assert _wmo_to_condition(52) == "pouring"
+    assert _wmo_to_condition(54) == "pouring"
+    assert _wmo_to_condition(64) == "pouring"
 
 
-def test_status_cloudy_code_range():
-    wd = WeatherData(weather_code=44)
-    assert _compute_status(wd) == "cloudy"
+def test_snowy_rainy():
+    for code in (66, 67, 86):
+        assert _wmo_to_condition(code) == "snowy-rainy", f"failed for code {code}"
 
 
-def test_status_cloudy_cover():
-    wd = WeatherData(cloud_cover=80)
-    assert _compute_status(wd) == "cloudy"
+def test_snowy():
+    for code in (71, 73, 75, 77, 85, 87):
+        assert _wmo_to_condition(code) == "snowy", f"failed for code {code}"
 
 
-def test_status_cloudy_low_code():
-    wd = WeatherData(weather_code=4)
-    assert _compute_status(wd) == "cloudy"
+def test_lightning():
+    assert _wmo_to_condition(95) == "lightning"
 
 
-def test_status_fog():
-    wd = WeatherData(weather_code=45)
-    assert _compute_status(wd) == "fog"
+def test_lightning_rainy():
+    assert _wmo_to_condition(96) == "lightning-rainy"
+    assert _wmo_to_condition(99) == "lightning-rainy"
 
 
-def test_status_fog_rime_fog():
-    wd = WeatherData(weather_code=48)
-    assert _compute_status(wd) == "fog"
-
-
-def test_status_hail():
-    wd = WeatherData(weather_code=77, temperature=1.0)
-    assert _compute_status(wd) == "hail"
-
-
-def test_status_hail_temp_boundary():
-    wd = WeatherData(weather_code=77, temperature=2.0)
-    assert _compute_status(wd) == "hail"
-
-
-def test_status_snowy_code():
-    wd = WeatherData(weather_code=71)
-    assert _compute_status(wd) == "snowy"
-
-
-def test_status_snowy_heavy():
-    wd = WeatherData(weather_code=75)
-    assert _compute_status(wd) == "snowy"
-
-
-def test_status_snowy_drizzle():
-    wd = WeatherData(weather_code=85)
-    assert _compute_status(wd) == "snowy"
-
-
-def test_status_snowy_77_warm():
-    wd = WeatherData(weather_code=77, temperature=10)
-    assert _compute_status(wd) == "snowy"
-
-
-def test_status_snowy_rainy():
-    wd = WeatherData(weather_code=66)
-    assert _compute_status(wd) == "snowy-rainy"
-
-
-def test_status_snowy_rainy_codes():
-    for code in (67, 86):
-        wd = WeatherData(weather_code=code)
-        assert _compute_status(wd) == "snowy-rainy", f"failed for code {code}"
-
-
-def test_status_lightning():
-    wd = WeatherData(weather_code=95)
-    assert _compute_status(wd) == "lightning"
-
-
-def test_status_lightning_rainy():
-    wd = WeatherData(weather_code=96)
-    assert _compute_status(wd) == "lightning-rainy"
-
-
-def test_status_rainy_precip():
-    wd = WeatherData(precipitation_intensity=2.0)
-    assert _compute_status(wd) == "rainy"
-
-
-def test_status_rainy_wmo_fallback():
-    wd = WeatherData(weather_code=61, precipitation_intensity=0)
-    assert _compute_status(wd) == "rainy"
-
-
-def test_status_rainy_wmo_codes():
-    for code in (51, 53, 55, 61, 63, 64, 80, 81, 82):
-        wd = WeatherData(weather_code=code)
-        assert _compute_status(wd) == "rainy", f"failed for code {code}"
-
-
-def test_status_pouring():
-    wd = WeatherData(precipitation_intensity=6.0)
-    assert _compute_status(wd) == "pouring"
-
-
-def test_status_windy():
-    wd = WeatherData(wind_speed=12.0)
-    assert _compute_status(wd) == "windy"
-
-
-def test_status_windy_boundary():
-    wd = WeatherData(wind_speed=10.0)
-    assert _compute_status(wd) == "windy"
-
-
-def test_status_windy_variant():
-    wd = WeatherData(wind_speed=16.0)
-    assert _compute_status(wd) == "windy-variant"
-
-
-def test_status_windy_variant_boundary():
-    wd = WeatherData(wind_speed=15.0)
-    assert _compute_status(wd) == "windy-variant"
-
-
-def test_status_none_all_empty():
-    wd = WeatherData()
-    assert _compute_status(wd) is None
-
-
-def test_status_clear_night_cloud_fallback():
-    wd = WeatherData(cloud_cover=5, sun_elevation=-5)
-    assert _compute_status(wd) == "clear-night"
-
-
-def test_status_sunny_cloud_fallback():
-    wd = WeatherData(cloud_cover=10, sun_elevation=30)
-    assert _compute_status(wd) == "sunny"
-
-
-def test_status_snowy_thunder_priority():
-    wd = WeatherData(weather_code=96, precipitation_intensity=0)
-    assert _compute_status(wd) == "lightning-rainy"
-
-
-def test_status_snowy_rainy_thunder_priority():
-    wd = WeatherData(weather_code=66, precipitation_intensity=0)
-    assert _compute_status(wd) == "snowy-rainy"
-
-
-def test_status_snowy_over_measured_precip():
-    wd = WeatherData(weather_code=71, precipitation_intensity=1.0)
-    assert _compute_status(wd) == "snowy"
-
-
-def test_status_pouring_over_wind():
-    wd = WeatherData(precipitation_intensity=7.0, wind_speed=20.0)
-    assert _compute_status(wd) == "pouring"
-
-
-def test_status_windy_over_precip_zero():
-    wd = WeatherData(precipitation_intensity=0, wind_speed=14.0)
-    assert _compute_status(wd) == "windy"
-
-
-def test_status_rainy_precip_over_wmo():
-    wd = WeatherData(precipitation_intensity=0.5, weather_code=61)
-    assert _compute_status(wd) == "rainy"
-
-
-def test_status_windy_below_threshold():
-    wd = WeatherData(wind_speed=9.9)
-    assert _compute_status(wd) is None
-
-
-def test_status_precip_zero_not_rainy():
-    wd = WeatherData(precipitation_intensity=0)
-    assert _compute_status(wd) is None
-
-
-def test_status_precip_exactly_5_not_pouring():
-    wd = WeatherData(precipitation_intensity=5.0)
-    assert _compute_status(wd) == "rainy"
-
-
-def test_status_precip_5_1_pouring():
-    wd = WeatherData(precipitation_intensity=5.1)
-    assert _compute_status(wd) == "pouring"
-
-
-def test_status_precip_extreme_pouring():
-    wd = WeatherData(precipitation_intensity=100.0)
-    assert _compute_status(wd) == "pouring"
-
-
-def test_status_windy_variant_at_50():
-    wd = WeatherData(wind_speed=50.0)
-    assert _compute_status(wd) == "windy-variant"
-
-
-def test_status_cold_but_sunny():
-    wd = WeatherData(temperature=-30.0, weather_code=0, sun_elevation=45.0)
-    assert _compute_status(wd) == "sunny"
-
-
-def test_status_sun_elevation_zenith():
-    wd = WeatherData(weather_code=0, sun_elevation=90.0)
-    assert _compute_status(wd) == "sunny"
-
-
-def test_status_wmo_52_freezing_drizzle_rainy():
-    wd = WeatherData(weather_code=52, precipitation_intensity=0)
-    assert _compute_status(wd) == "rainy"
+def test_none():
+    assert _wmo_to_condition(None) is None
 
 
 # ---------------------------------------------------------------------------

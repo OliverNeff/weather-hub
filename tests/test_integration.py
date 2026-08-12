@@ -101,7 +101,9 @@ async def test_endpoint_has_all_fields(client):
 
 @pytest.mark.asyncio
 async def test_status_computed(client):
-    wd = _make_weather_data(temperature=20.0, precipitation_intensity=3.0, source="dwd")
+    wd = _make_weather_data(
+        temperature=20.0, precipitation_intensity=3.0, weather_code=61, source="dwd"
+    )
     with (
         patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=wd),
         patch(
@@ -119,7 +121,7 @@ async def test_status_computed(client):
 
 
 @pytest.mark.asyncio
-async def test_status_sunny_when_clear(client):
+async def test_status_clear_night_when_clear(client):
     wd = _make_weather_data(
         temperature=25.0, weather_code=0, sun_elevation=45.0, source="openmeteo"
     )
@@ -136,7 +138,7 @@ async def test_status_sunny_when_clear(client):
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
-        assert data["status"] == "sunny"
+        assert data["status"] == "clear-night"
 
 
 @pytest.mark.asyncio

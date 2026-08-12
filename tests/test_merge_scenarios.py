@@ -68,7 +68,7 @@ def _wd(
 
 
 # ---------------------------------------------------------------------------
-# Scenario: Rain is starting — radar detects it, stations haven't updated yet
+# Scenario: Rain is starting — WMO code indicates rain
 # ---------------------------------------------------------------------------
 
 
@@ -85,8 +85,8 @@ async def test_scenario_rain_starting_radar_only(client):
         source="buienradar",
     )
     om = _wd(
-        weather_code=2,
-        cloud_cover=40,
+        weather_code=61,
+        cloud_cover=80,
         source="openmeteo",
     )
     with (
@@ -99,17 +99,18 @@ async def test_scenario_rain_starting_radar_only(client):
         # max() across adapters picks the radar value
         assert data["precipitation_intensity"] == 1.5
         assert data["precipitation_now"] is True
+        # status derived from WMO code
         assert data["status"] == "rainy"
 
 
 # ---------------------------------------------------------------------------
-# Scenario: Rain stopping — stations still report, radar is clear
+# Scenario: Rain stopping — stations still report, WMO code shows clear
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_scenario_rain_stopping_station_only(client):
-    """DWD reports precip (delayed), radar and openmeteo show clear skies."""
+    """DWD reports precip (delayed), but WMO code shows overcast."""
     dwd = _wd(
         temperature=18.0,
         precipitation_intensity=2.0,
@@ -120,7 +121,7 @@ async def test_scenario_rain_stopping_station_only(client):
         source="buienradar",
     )
     om = _wd(
-        weather_code=0,
+        weather_code=3,
         sun_elevation=45.0,
         source="openmeteo",
     )
@@ -134,8 +135,8 @@ async def test_scenario_rain_stopping_station_only(client):
         # max() picks DWD's stale data — conservative (over-reporting is safer)
         assert data["precipitation_intensity"] == 2.0
         assert data["precipitation_now"] is True
-        # Status: max precip wins, status = rainy
-        assert data["status"] == "rainy"
+        # status derived from WMO code
+        assert data["status"] == "cloudy"
 
 
 # ---------------------------------------------------------------------------
@@ -158,16 +159,17 @@ async def test_scenario_rain_stopped_all_clear(client):
         data = resp.json()
         assert data["precipitation_intensity"] == 0.0
         assert data["precipitation_now"] is False
-        assert data["status"] == "sunny"
+        # WMO 0 → clear-night (no sunny/clear-night distinction in WMO mapping)
+        assert data["status"] == "clear-night"
 
 
 # ---------------------------------------------------------------------------
-# Scenario: Cloudy to sunny transition (weather_code changes)
+# Scenario: Cloudy to clear transition (weather_code changes)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_scenario_cloudy_to_sunny(client):
+async def test_scenario_cloudy_to_clear(client):
     """Cloud cover drops, weather_code goes from 3 to 0."""
     dwd = _wd(temperature=22.0, source="dwd")
     bu = _wd(source="buienradar")
@@ -179,11 +181,11 @@ async def test_scenario_cloudy_to_sunny(client):
     ):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
-        assert data["status"] == "sunny"
+        assert data["status"] == "clear-night"
 
 
 @pytest.mark.asyncio
-async def test_scenario_sunny_to_cloudy(client):
+async def test_scenario_clear_to_cloudy(client):
     """Cloud cover increases, weather_code goes from 0 to 3."""
     dwd = _wd(temperature=20.0, source="dwd")
     bu = _wd(source="buienradar")
@@ -199,35 +201,13 @@ async def test_scenario_sunny_to_cloudy(client):
 
 
 # ---------------------------------------------------------------------------
-# Scenario: Rain to pouring transition (intensity increases)
+# Scenario: Night — weather_code=0, sun below horizon
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_scenario_rain_to_pouring(client):
-    """Light rain intensifies to heavy rain."""
-    dwd = _wd(precipitation_intensity=3.0, source="dwd")
-    bu = _wd(precipitation_intensity=7.0, source="buienradar")
-    om = _wd(weather_code=63, source="openmeteo")
-    with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=dwd),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=bu),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=om),
-    ):
-        resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
-        data = resp.json()
-        assert data["precipitation_intensity"] == 7.0
-        assert data["status"] == "pouring"
-
-
-# ---------------------------------------------------------------------------
-# Scenario: Night transition — sunny to clear-night
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_scenario_day_to_night_clear(client):
-    """Same weather_code=0, sun_elevation drops below horizon."""
+async def test_scenario_clear_night(client):
+    """Clear sky at night: weather_code=0, sun below horizon."""
     dwd = _wd(temperature=15.0, source="dwd")
     bu = _wd(source="buienradar")
     om = _wd(weather_code=0, sun_elevation=-10.0, source="openmeteo")
@@ -241,24 +221,8 @@ async def test_scenario_day_to_night_clear(client):
         assert data["status"] == "clear-night"
 
 
-@pytest.mark.asyncio
-async def test_scenario_night_to_day_sunny(client):
-    """Same weather_code=0, sun_elevation rises above horizon."""
-    dwd = _wd(temperature=16.0, source="dwd")
-    bu = _wd(source="buienradar")
-    om = _wd(weather_code=0, sun_elevation=5.0, source="openmeteo")
-    with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=dwd),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=bu),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=om),
-    ):
-        resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
-        data = resp.json()
-        assert data["status"] == "sunny"
-
-
 # ---------------------------------------------------------------------------
-# Scenario: Wind picks up — calm to windy to windy-variant
+# Scenario: Wind — prefers DWD over Buienradar
 # ---------------------------------------------------------------------------
 
 
@@ -278,6 +242,7 @@ async def test_scenario_wind_picks_up(client):
         # DWD preferred over Buienradar (200km away) and Open-Meteo (model)
         assert data["wind_speed"] == 3.0
         assert data["wind_gust"] == 5.0
+        # No weather_code → no status
         assert data["status"] is None
 
 
@@ -439,14 +404,13 @@ async def test_uv_from_openmeteo(client):
 
 
 # ---------------------------------------------------------------------------
-# Scenario: WMO rain fallback when DWD stations are stale
+# Scenario: WMO rain code takes precedence over stale DWD stations
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_scenario_wmo_rain_overrides_stale_dwd(client):
-    """DWD reports 0 precip (stale), but WMO code = 63 (moderate rain).
-    Status should be rainy, not sunny."""
+    """DWD reports 0 precip (stale), WMO code = 63 (moderate rain)."""
     dwd = _wd(temperature=18.0, precipitation_intensity=0.0, source="dwd")
     bu = _wd(precipitation_intensity=0.0, source="buienradar")
     om = _wd(weather_code=63, cloud_cover=80, sun_elevation=45.0, source="openmeteo")
@@ -458,7 +422,7 @@ async def test_scenario_wmo_rain_overrides_stale_dwd(client):
         resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
         data = resp.json()
         assert data["precipitation_now"] is False
-        assert data["status"] == "rainy"  # WMO fallback
+        assert data["status"] == "rainy"
 
 
 # ---------------------------------------------------------------------------
@@ -499,32 +463,16 @@ async def test_precipitation_now_none_from_all(client):
 
 
 # ---------------------------------------------------------------------------
-# Scenario: Fog during day vs night
+# Scenario: Fog
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_scenario_fog_day(client):
-    """Fog (WMO 45) during daytime."""
+async def test_scenario_fog(client):
+    """Fog (WMO 45)."""
     dwd = _wd(source="dwd")
     bu = _wd(source="buienradar")
     om = _wd(weather_code=45, sun_elevation=5.0, source="openmeteo")
-    with (
-        patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=dwd),
-        patch("app.routers.weather_data.fetch_buienradar_weather", return_value=bu),
-        patch("app.routers.weather_data.fetch_openmeteo_weather", return_value=om),
-    ):
-        resp = await client.get("/weather/data", params={"lat": 50.0, "lon": 9.0})
-        data = resp.json()
-        assert data["status"] == "fog"
-
-
-@pytest.mark.asyncio
-async def test_scenario_fog_night(client):
-    """Fog (WMO 45) during night."""
-    dwd = _wd(source="dwd")
-    bu = _wd(source="buienradar")
-    om = _wd(weather_code=45, sun_elevation=-5.0, source="openmeteo")
     with (
         patch("app.routers.weather_data.fetch_wetterdienst_weather", return_value=dwd),
         patch("app.routers.weather_data.fetch_buienradar_weather", return_value=bu),
@@ -561,4 +509,5 @@ async def test_scenario_buienradar_too_far(client):
         data = resp.json()
         assert data["temperature"] == 20.0  # from DWD
         assert data["precipitation_intensity"] == 3.0  # from Buienradar radar
-        assert data["status"] == "rainy"
+        # No weather_code → no status
+        assert data["status"] is None
