@@ -33,27 +33,6 @@ def _base_config(state_topic: str, unique_id: str, name: str) -> dict[str, Any]:
     }
 
 
-def _wmo_to_condition_template() -> str:
-    """Jinja template: WMO code → HA weather condition string (automatically localized)."""
-    # WMO code mapping based on https://open-meteo.com/en/docs
-    # HA conditions: sunny, cloudy, fog, rainy, snowy, snowy-rainy, hail, lightning, windy, clear-night, partlycloudy
-    return (
-        "{% set c = value_json.weather_code %}"
-        "{% if c is none %}unknown"
-        "{% elif c == 0 %}clear-night"
-        "{% elif c == 1 %}clear-night"
-        "{% elif c == 2 %}partlycloudy"
-        "{% elif c == 3 %}cloudy"
-        "{% elif c in [45, 48] %}fog"
-        "{% elif c in [51, 53, 55, 56, 61, 63, 65, 80, 81, 82] %}rainy"
-        "{% elif c in [66, 67, 86] %}snowy-rainy"
-        "{% elif c in [71, 73, 75, 77, 85, 87] %}snowy"
-        "{% elif c == 95 %}lightning"
-        "{% elif c in [96, 99] %}lightning-rainy"
-        "{% else %}unknown{% endif %}"
-    )
-
-
 def _clean(d: dict[str, Any]) -> dict[str, Any]:
     """Remove None values from config dict. HA rejects discovery payloads with null fields."""
     return {k: v for k, v in d.items() if v is not None}
@@ -184,16 +163,7 @@ async def discover_all(client: "MQTTClient | StubClient") -> None:
         build_sensor_config(
             "cloud-cover", "cloud_cover", name="Cloud Cover", unit_of_measurement="%"
         ),
-        # WMO code → HA condition string (HA localizes automatically, e.g. "sunny" → "Sonnig")
-        (
-            f"{DISCOVERY_PREFIX}/sensor/weather-hub/weather-code/config",
-            _clean(
-                {
-                    **_base_config(st, "weather-hub-weather-code", "Weather Code"),
-                    "value_template": _wmo_to_condition_template(),
-                }
-            ),
-        ),
+        build_sensor_config("weather-code", "weather_code", name="Weather Code"),
         build_sensor_config("sunrise", "sunrise", name="Sunrise", device_class="timestamp"),
         build_sensor_config("sunset", "sunset", name="Sunset", device_class="timestamp"),
         build_sensor_config(
