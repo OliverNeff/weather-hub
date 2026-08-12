@@ -38,26 +38,6 @@ def _clean(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def build_weather_config(state_topic: str) -> tuple[str, dict[str, Any]]:
-    """Weather entity — uses HA weather component attributes."""
-    return (
-        f"{DISCOVERY_PREFIX}/weather/weather-hub/config",
-        _clean(
-            {
-                **_base_config(state_topic, "weather-hub", "Weather Hub"),
-                "device_class": "weather",
-                "value_template": "{{ value_json.status }}",
-                "temperature_attribute": "temperature",
-                "wind_speed_attribute": "wind_speed",
-                "precipitation_intensity_attribute": "precipitation_intensity",
-                "uv_index_attribute": "uv_index",
-                "cloud_cover_attribute": "cloud_cover",
-                "attributes_template": "{{ value_json | tojson }}",
-            }
-        ),
-    )
-
-
 def build_sensor_config(
     entity_id: str,
     field: str,
@@ -106,10 +86,7 @@ def build_binary_sensor_config(
 
 async def discover_all(client: "MQTTClient | StubClient") -> None:
     """Publish all discovery configs with retain=true."""
-    st = _state_topic()
     configs: list[tuple[str, dict[str, Any]]] = [
-        # Weather entity
-        build_weather_config(st),
         # Sensors
         build_sensor_config(
             "temperature",
