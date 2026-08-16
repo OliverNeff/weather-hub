@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 
 from app.adapter.buinradar import fetch_buienradar_weather
 from app.adapter.openmeteo import fetch_openmeteo_weather
+from app.adapter.warnings import fetch_warnings
 from app.adapter.wetterdienst_dwd import fetch_wetterdienst_weather
 from app.models.weather_data import WeatherData
 
@@ -214,8 +215,9 @@ async def get_weather_data(
 ) -> WeatherData:
     """Current weather and short-term precipitation forecast.
 
-    Fetches data from three providers in parallel (DWD, Open-Meteo, Buienradar)
-    and merges the results. A single provider failure doesn't affect the response.
+    Fetches data from DWD, Open-Meteo and Buienradar in parallel, plus
+    active DWD weather warnings (CAP alerts) for the location, and merges
+    the results. A single provider failure doesn't affect the response.
 
     **Merge strategy**
 
@@ -227,12 +229,13 @@ async def get_weather_data(
 
     All response fields are nullable — `null` means the provider had no data.
     """
-    # Fetch all three adapters in parallel — each wrapped so one failure
+    # Fetch all adapters in parallel — each wrapped so one failure
     # doesn't take down the whole request.
-    dwd, buienradar, openmeteo = await asyncio.gather(
+    dwd, buienradar, openmeteo, warnings = await asyncio.gather(
         _safe_fetch(fetch_wetterdienst_weather, lat, lon),
         _safe_fetch(fetch_buienradar_weather, lat, lon),
         _safe_fetch(fetch_openmeteo_weather, lat, lon),
+        _safe_fetch(fetch_warnings, lat, lon),
     )
 
     merged = WeatherData()
@@ -284,6 +287,10 @@ async def get_weather_data(
         if stops_at is None:
             stops_at, _ = _pick_first(fresh, "precipitation_stops_at")
         merged.precipitation_stops_at = stops_at
+
+    # Active DWD warnings for the location (point-in-polygon on the
+    # warning district polygons). The adapter caches the alert list for 10min.
+    merged.alerts = warnings.alerts
 
     # Derive HA weather status from WMO code.
     merged.status = _compute_status(merged)

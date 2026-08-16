@@ -5,6 +5,18 @@ from pydantic import BaseModel, Field
 from app.models.weather_station import WeatherStation
 
 
+class Alert(BaseModel):
+    """A weather warning from the DWD (CAP alert) for a given location."""
+
+    event: str = Field(description="Warning type, e.g. STARKES GEWITTER, STARKE HITZE")
+    severity: str = Field(description="CAP severity: Minor / Moderate / Severe / Extreme")
+    description: str | None = Field(default=None, description="Warning text (German)")
+    instruction: str | None = Field(default=None, description="Recommended actions")
+    area: str = Field(description="Warning area (DWD warning region, e.g. Kreis ... und Stadt ...)")
+    onset: datetime | None = Field(default=None, description="Warning start time (UTC)")
+    expires: datetime | None = Field(default=None, description="Warning end time (UTC)")
+
+
 class WeatherData(BaseModel):
     """Merged weather data from DWD, Open-Meteo and Buienradar."""
 
@@ -113,6 +125,12 @@ class WeatherData(BaseModel):
     sunset: datetime | None = Field(
         default=None,
         description="Sunset time today (UTC)",
+    )
+
+    # --- Warnings (DWD CAP alerts) ---
+    alerts: list[Alert] = Field(
+        default_factory=list,
+        description="Active DWD weather warnings for the location (empty if none)",
     )
 
     # --- Stations ---

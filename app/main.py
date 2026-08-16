@@ -12,7 +12,7 @@ load_dotenv()
 from fastapi import FastAPI
 
 from app.mqtt import MQTTClient, StubClient, publish_weather, set_client
-from app.routers import weather_data
+from app.routers import alerts, weather_data
 from app.routers.weather_data import get_weather_data
 
 logger = logging.getLogger(__name__)
@@ -84,3 +84,4 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Weather Hub", lifespan=lifespan)
 app.include_router(weather_data.router)
+app.include_router(alerts.router)

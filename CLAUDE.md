@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Weather Hub is a FastAPI microservice that fetches weather data (current conditions + short-term forecast) from multiple providers and exposes it via a single REST endpoint.
+Weather Hub is a FastAPI microservice that fetches weather data (current conditions + short-term forecast + active DWD warnings) from multiple providers and exposes it via a single REST endpoint.
 
 ## Tech Stack
 
 - **Runtime**: Python 3.14+ (managed by `uv`)
 - **Framework**: FastAPI [standard](pyproject.toml) (includes uvicorn, starlette, pydantic)
 - **Weather providers**: `buienradar` (1.0.9), `wetterdienst` (DWD/MosMix), `httpx` (Open-Meteo)
+- **Warnings**: DWD OPeNDATA CAP 1.2 XML zips (plain `httpx` + stdlib `zipfile`/`xml.etree`)
 - **MQTT**: `fastmqtt` (publishes merged weather data on timer)
 - **Utilities**: `haversine` (distance), `polars` (data processing)
 - **Package manager**: `uv` (see `uv.lock`)
@@ -23,14 +24,17 @@ app/
 ├── mqtt.py                        # MQTT push client (FastMQTT + StubClient)
 ├── mqtt_discovery.py              # Home Assistant MQTT Discovery configs
 ├── routers/
-│   └── weather_data.py            # GET /weather/data?lat=&lon=
+│   ├── weather_data.py            # GET /weather/data?lat=&lon=
+│   └── alerts.py                  # GET /weather/alerts?lat=&lon=
 ├── models/
-│   ├── weather_data.py            # WeatherData Pydantic response schema
-│   └── weather_station.py         # WeatherStation Pydantic model
+│   ├── weather_data.py            # WeatherData Pydantic response schema + Alert model
+│   ├── weather_station.py         # WeatherStation Pydantic model
+│   └── alerts.py                  # AlertsResponse (dedicated /weather/alerts)
 └── adapter/
     ├── buinradar.py               # Buienradar API client
     ├── wetterdienst_dwd.py        # DWD client (Observation + MosMix forecast)
-    └── openmeteo.py               # Open-Meteo client (plain httpx, no FFI)
+    ├── openmeteo.py               # Open-Meteo client (plain httpx, no FFI)
+    └── warnings.py                # DWD weather warnings (CAP alerts, OPeNDATA)
 ```
 
 ## Key Commands
@@ -41,6 +45,9 @@ uv run uvicorn app.main:app --reload
 
 # Run a quick API smoke test
 uv run python -c "import httpx; print(httpx.get('http://127.0.0.1:8000/weather/data?lat=49.87&lon=8.93').json())"
+
+# Smoke-test the dedicated alerts endpoint
+uv run python -c "import httpx; print(httpx.get('http://127.0.0.1:8000/weather/alerts?lat=49.87&lon=8.93').json())"
 ```
 
 ## Architecture
@@ -51,11 +58,14 @@ The app follows a thin layered architecture:
 2. **Adapter** (`app/adapter/`) — external-API clients. Each provider has its own adapter module. They fetch raw data, parse it, and map to `WeatherData`.
 3. **Models** (`app/models/`) — Pydantic `BaseModel` classes that define the API response schema. All fields are nullable (`float | None`) because weather stations don't always report every measurement.
 
-The only public endpoint is `GET /weather/data?lat=...&lon=...`.
+Two public endpoints:
+
+- `GET /weather/data?lat=...&lon=...` — merged weather + forecast + active warnings (`WeatherData`).
+- `GET /weather/alerts?lat=...&lon=...` — lightweight endpoint returning **only** active DWD warnings (`AlertsResponse`: `count` + `alerts`, most severe first). Reuses the warnings adapter (10-minute cache), so it's cheap to poll. Intended for consumers that display alerts on separate devices (e.g. a pixel display) without the full weather payload.
 
 ### Adapters
 
-Three adapters run in parallel per request. A single adapter failure doesn't take down the response.
+Four adapters run in parallel per request. A single adapter failure doesn't take down the response.
 
 **DWD Adapter** (`wetterdienst_dwd.py`): Combines two DWD sources:
 - **Observation**: Fetches temperature, wind speed, wind gust, and precipitation from `recent` period at `10_minutes` resolution. Each parameter is fetched from its own pool of nearest stations — precipitation from the nearest rain gauges, wind from the nearest anemometers, etc. (Not all stations report all parameters). The 4 parameter requests run in parallel via `ThreadPoolExecutor`. Only stations with fresh data (>2h threshold for precipitation) appear in the result, trimmed to the 3 nearest.
@@ -65,9 +75,11 @@ Three adapters run in parallel per request. A single adapter failure doesn't tak
 
 **Buienradar Adapter** (`buinradar.py`): Calls `buienradar.buienradar.get_data()`, parses the JSON `content` string and `raincontent` grid. Rain content uses integer codes per 5-minute interval, converted via `to_mmh()`: `10 ** ((code - 109) / 32)`. Station lookup uses Euclidean distance (not haversine). Radar precipitation forecast (30m/1h/2h) works for Germany too — it's grid-based, not station-based. Only temperature/wind/current-precipitation are NL-only (nearest NL station).
 
+**Warnings Adapter** (`warnings.py`): Fetches active DWD weather warnings from OPeNDATA as CAP 1.2 XML zips — the same data the NINA/EEW apps use, no API key required. The `LATEST` symlink at `opendata.dwd.de/weather/alerts/cap/DISTRICT_EVENT_STAT/Z_CAP_C_EDZW_LATEST_PVW_STATUS_PREMIUMEVENT_DISTRICT_DE.zip` always points to the current state of all German warnings (~100 KB). Warnings are regional (per DWD warning district), so the requested lat/lon is matched against each warning's `<polygon>` via point-in-polygon (even-odd ray casting). One alert can contain multiple `<area>` elements (Kreis + Stadt as separate polygons) — all must be checked. In-memory cache with 10-minute TTL (warnings change rarely). Expired alerts are dropped (5 min grace). On download failure the adapter returns an empty list — alerts never break the weather response.
+
 ### Response merging (`weather_data.py`)
 
-The router fetches all 3 adapters in parallel, then merges:
+The router fetches all 4 adapters in parallel, then merges:
 
 | Fields | Strategy | Why |
 |---|---|---|
@@ -77,6 +89,7 @@ The router fetches all 3 adapters in parallel, then merges:
 | Temperature | Freshest source (newest timestamp first) | Most recent data is most accurate |
 | UV index | Freshest source | Open-Meteo provides accurate real-time UV; DWD's is rough |
 | Sunrise/sunset/sun elevation | Freshest source | Only Open-Meteo provides these |
+| Alerts | Warnings adapter only (point-in-polygon) | Regional data, single source |
 | Stations | All stations from all adapters | Shows which sources contributed |
 
 ### Status computation (`weather_data.py`)
@@ -116,11 +129,11 @@ When `MQTT_LAT` and `MQTT_LON` are set, a background timer fetches weather data 
 
 On startup with a real broker, publishes Home Assistant MQTT Discovery configs with `retain=true`. Skipped in stub mode.
 
-- `discover_all(client)` — entry point, called from lifespan, publishes 23 entities
-- `build_weather_config()` — weather entity with `temperature_attribute`, `wind_speed_attribute`, `uv_index_attribute`, `precipitation_intensity_attribute`, `cloud_cover_attribute`
+- `discover_all(client)` — entry point, called from lifespan, publishes 24 entities
 - `build_sensor_config()` / `build_binary_sensor_config()` — generic sensor/binary sensor builders
+- `build_alerts_config()` — weather warnings sensor; Jinja2 `value_template` renders the alert list (e.g. "STARKE HITZE; STARKES GEWITTER (2)"), "unknown" when none
 - `DISCOVERY_PREFIX` configurable via `HA_DISCOVERY_PREFIX` (default: `homeassistant`)
-- Entities: 1 weather + 18 sensors + 4 binary sensors, all under device "Weather Hub"
+- Entities: 20 sensors + 4 binary sensors, all under device "Weather Hub"
 
 ## Windows SSL Configuration
 

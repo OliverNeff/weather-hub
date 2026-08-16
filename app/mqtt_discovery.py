@@ -84,6 +84,31 @@ def build_binary_sensor_config(
     )
 
 
+def build_alerts_config() -> tuple[str, dict[str, Any]]:
+    """Weather warnings sensor — one entry per active DWD warning.
+
+    The template renders a list of dicts as lines like
+    "STARKES GEWITTER (Moderate) — Kreis ... und Stadt ...".
+    """
+    st = _state_topic()
+    value_template = (
+        "{% set alerts = value_json.alerts %}"
+        "{% if alerts is none or alerts|length == 0 %}unknown"
+        "{% else %}"
+        "{{ alerts|map(attribute='event')|list|join('; ') }} ({{ alerts|length }})"
+        "{% endif %}"
+    )
+    return (
+        f"{DISCOVERY_PREFIX}/sensor/weather-hub/alerts/config",
+        _clean(
+            {
+                **_base_config(st, "weather-hub-alerts", "Weather Warnings"),
+                "value_template": value_template,
+            }
+        ),
+    )
+
+
 async def discover_all(client: "MQTTClient | StubClient") -> None:
     """Publish all discovery configs with retain=true."""
     configs: list[tuple[str, dict[str, Any]]] = [
@@ -216,6 +241,8 @@ async def discover_all(client: "MQTTClient | StubClient") -> None:
         build_binary_sensor_config(
             "precip-2h", "precipitation_next_2h", name="Precipitation 2h", device_class="problem"
         ),
+        # Weather warnings (DWD CAP alerts)
+        build_alerts_config(),
     ]
 
     for topic, payload in configs:
